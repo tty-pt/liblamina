@@ -1,9 +1,5 @@
 ## [1.0.0]
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/tty-pt/liblamina/main/logo.png" alt="liblamina logo" width="220" />
-</p>
-
 - **Inaugural Release of liblamina** (formerly `libqgl`):
   - Consolidated cross-platform 2D graphics layer and flexbox UI layout engine in pure C.
   - Unified immediate-mode rendering across desktop displays (OpenGL via GLFW on Linux X11/Wayland, macOS, Windows) and direct hardware on embedded Linux (via memory-mapped `/dev/fb0` without X11 or Wayland).
