@@ -1,4 +1,4 @@
-## 1.0.0
+## [1.0.0]
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tty-pt/liblamina/main/logo.png" alt="liblamina logo" width="220" />
