@@ -16,6 +16,8 @@ LDLIBS := -lm -lxxhash -lcorm -lstele -lpng
 LDLIBS += ${LDLIBS-${BE}}
 
 LDLIBS-Linux += -lEGL
+LDLIBS-Linux += -Wl,--no-as-needed -lstele -Wl,--as-needed
+LDLIBS += ${LDLIBS-${uname}}
 
 obj-y := glfw img png
 obj-y += tile font

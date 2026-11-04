@@ -368,8 +368,7 @@ static void gl_deinit(void)
 void img_deinit(void);
 void shadow_deinit(void);
 
-__attribute__((destructor))
-static void destructor(void)
+void lam_deinit(void)
 {
 	lam_input.deinit();
 	if (lam_be.init != dummy_be_init) {

@@ -293,11 +293,20 @@ shadow_deinit(void)
 	const void *key, *val;
 	uint32_t it;
 
-	it = corm_iter(g_round_tex_map_hd, NULL, 0);
-	while (corm_next(&key, &val, it))
-		glDeleteTextures(1, (const GLuint *)val);
-	corm_close(g_round_tex_map_hd);
+	if (g_round_tex_map_hd) {
+		it = corm_iter(g_round_tex_map_hd, NULL, 0);
+		while (corm_next(&key, &val, it))
+			glDeleteTextures(1, (const GLuint *)val);
+		corm_close(g_round_tex_map_hd);
+		g_round_tex_map_hd = 0;
+	}
 
-	glDeleteProgram(prog_fill_round);
-	glDeleteProgram(prog_stroke_round);
+	if (prog_fill_round) {
+		glDeleteProgram(prog_fill_round);
+		prog_fill_round = 0;
+	}
+	if (prog_stroke_round) {
+		glDeleteProgram(prog_stroke_round);
+		prog_stroke_round = 0;
+	}
 }

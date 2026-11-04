@@ -5,6 +5,7 @@
 #include <ttypt/corm.h>
 #include <ttypt/stele.h>
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 typedef struct {
@@ -72,9 +73,18 @@ void img_load_all(void)
 void
 img_deinit(void)
 {
-	corm_close(img_be_hd);
-	corm_close(img_hd);
-	corm_close(img_name_hd);
+	if (img_be_hd) {
+		corm_close(img_be_hd);
+		img_be_hd = 0;
+	}
+	if (img_hd) {
+		corm_close(img_hd);
+		img_hd = 0;
+	}
+	if (img_name_hd) {
+		corm_close(img_name_hd);
+		img_name_hd = 0;
+	}
 }
 
 unsigned

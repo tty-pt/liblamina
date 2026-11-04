@@ -98,6 +98,7 @@ void lam_size(uint32_t *width, uint32_t *height);
  * before any rendering or input functions are used.
  */
 void lam_init(void);
+void lam_deinit(void);
 
 /** Default white RGBA tint (no color modulation). */
 static const uint32_t lam_default_tint = 0xFFFFFFFF;
