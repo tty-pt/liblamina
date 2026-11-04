@@ -31,6 +31,8 @@ liblamina-obj-y-Linux := ${posix:%=src/%.o}
 CFLAGS := -g
 all := liblamina
 
+WASM_SRCS := npm/wasm/lamina_wasm.c
+
 -include ../mk/include.mk
 
 ${DESTDIR}${PREFIX}/lib/pkgconfig/lamina.pc: lamina.pc
@@ -167,4 +169,19 @@ ${EXAMPLES_DIR}/06_ui_advanced${EXE}: ${EXAMPLES_DIR} ${EXAMPLES_DIR}/06_ui_adva
 
 examples: lib/liblamina.${SO} ${EXAMPLE_BINS}
 
-.PHONY: examples
+# Optional Node.js & WebAssembly bindings
+NPM ?= npm
+
+npm-build:
+	@if command -v $(NPM) >/dev/null 2>&1; then \
+		(cd npm && $(NPM) run build); \
+	else \
+		echo "Skipping npm build — $(NPM) not found"; \
+	fi
+
+npm-test: npm-build
+	@if command -v $(NPM) >/dev/null 2>&1; then \
+		(cd npm && $(NPM) test); \
+	fi
+
+.PHONY: examples npm-build npm-test
