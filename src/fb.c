@@ -17,7 +17,7 @@
 #include <string.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 
 #define LOAD_GL(name) do { \
 	name = (typeof(name)) eglGetProcAddress(#name); \

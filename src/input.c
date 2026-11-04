@@ -3,7 +3,7 @@
 #include <ctype.h>
 #include <stddef.h>
 
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 
 #include <GLFW/glfw3.h>
 

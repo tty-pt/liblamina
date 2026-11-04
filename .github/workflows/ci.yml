@@ -11,13 +11,13 @@ jobs:
     with:
       name: liblamina
       publish_to: "deb,apk,rpm,brew,openbsd,winget"
-      deps: "libcorm,libglfw3-dev,libpng-dev,libglew-dev"
-      deps_apk: "libcorm,glfw-dev,libpng-dev,glew-dev"
-      deps_rpm: "libcorm,glfw-devel,libpng-devel,glew-devel"
-      deps_brew: "libcorm,glfw,libpng"
-      deps_openbsd: "libcorm,libqsys,glfw,png,glew,xxhash"
+      deps: "libstele,libcorm,libglfw3-dev,libpng-dev,libglew-dev"
+      deps_apk: "libstele,libcorm,glfw-dev,libpng-dev,glew-dev"
+      deps_rpm: "libstele,libcorm,glfw-devel,libpng-devel,glew-devel"
+      deps_brew: "libstele,libcorm,glfw,libpng"
+      deps_openbsd: "libstele,libcorm,glfw,png,glew,xxhash"
       deps_winget: "mingw-w64-x86_64-glfw,mingw-w64-x86_64-libpng,mingw-w64-x86_64-glew,mingw-w64-x86_64-xxhash"
-      deps_winget_tty: "libqsys,libcorm"
+      deps_winget_tty: "libstele,libcorm"
     secrets:
       HOST: ${{ secrets.OPENBSD_HOST }}
       USER: ${{ secrets.OPENBSD_USER }}

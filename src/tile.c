@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include <ttypt/corm.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 
 static uint32_t tm_hd;
 

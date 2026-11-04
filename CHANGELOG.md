@@ -1,3 +1,9 @@
+## [1.0.1]
+
+- **Universal Substrate Migration (`libstele`)**:
+  - Replaced legacy `libqsys` with `libstele` (`-lstele`) across build configuration, pkg-config definition (`lamina.pc`), and CI packaging workflows.
+  - Aligned packaging dependencies across Debian, Alpine, RedHat/Rocky, Arch Linux, macOS, OpenBSD, and Windows.
+
 ## [1.0.0]
 
 - **Inaugural Release of liblamina** (formerly `libqgl`):

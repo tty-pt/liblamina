@@ -12,7 +12,7 @@ LDFLAGS-Darwin += -framework OpenGL -framework Cocoa -framework IOKit -framework
 
 add-prefix-OpenBSD += /usr/X11R6
 
-LDLIBS := -lm -lxxhash -lcorm -lqsys -lpng
+LDLIBS := -lm -lxxhash -lcorm -lstele -lpng
 LDLIBS += ${LDLIBS-${BE}}
 
 LDLIBS-Linux += -lEGL

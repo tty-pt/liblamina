@@ -2,7 +2,7 @@
 #include "./gl.h"
 #include "./be.h"
 #include "./input.h"
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 #include <ttypt/corm.h>
 
 #include <stdint.h>

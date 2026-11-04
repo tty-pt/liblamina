@@ -3,7 +3,7 @@
 #include "tex.h"
 
 #include <ttypt/corm.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 #include <string.h>
 #include <stdlib.h>
 

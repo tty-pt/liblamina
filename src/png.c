@@ -1,7 +1,7 @@
 #include <sys/time.h>
 #include <limits.h>
 #include <stdlib.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 #include <png.h>
 
 #include "tex.h"

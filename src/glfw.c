@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <GLFW/glfw3.h>
 #include <stdio.h>
-#include <ttypt/qsys.h>
+#include <ttypt/stele.h>
 
 lam_be_t lam_glfw;
 
