@@ -125,6 +125,85 @@ test("attachCanvas and LaminaSurface.flush integrate with canvas targets", () =>
   surf.free();
 });
 
+test("createLaminaRenderer hardware-accelerates via WebGL textured quad pipeline", () => {
+  let drawArraysCalls = 0;
+  let texImage2DCalls = 0;
+
+  const mockGl = {
+    VERTEX_SHADER: 35633,
+    FRAGMENT_SHADER: 35632,
+    LINK_STATUS: 35714,
+    ARRAY_BUFFER: 34962,
+    STATIC_DRAW: 35044,
+    FLOAT: 5126,
+    TEXTURE_2D: 3553,
+    TEXTURE_MIN_FILTER: 10241,
+    TEXTURE_MAG_FILTER: 10240,
+    NEAREST: 9728,
+    TEXTURE_WRAP_S: 10242,
+    TEXTURE_WRAP_T: 10243,
+    CLAMP_TO_EDGE: 33071,
+    RGBA: 6408,
+    UNSIGNED_BYTE: 5121,
+    TRIANGLES: 4,
+
+    createShader: () => ({}),
+    shaderSource: () => {},
+    compileShader: () => {},
+    createProgram: () => ({}),
+    attachShader: () => {},
+    linkProgram: () => {},
+    getProgramParameter: () => true,
+    useProgram: () => {},
+    createBuffer: () => ({}),
+    bindBuffer: () => {},
+    bufferData: () => {},
+    getAttribLocation: () => 0,
+    enableVertexAttribArray: () => {},
+    vertexAttribPointer: () => {},
+    createTexture: () => ({}),
+    bindTexture: () => {},
+    texParameteri: () => {},
+    viewport: () => {},
+    texImage2D: () => { texImage2DCalls++; },
+    drawArrays: (mode, first, count) => {
+      drawArraysCalls++;
+      assert.equal(mode, 4);
+      assert.equal(first, 0);
+      assert.equal(count, 6);
+    },
+    deleteTexture: () => {},
+    deleteBuffer: () => {},
+    deleteProgram: () => {}
+  };
+
+  const mockWebGlCanvas = {
+    width: 64,
+    height: 64,
+    getContext(type) {
+      if (type === "webgl2" || type === "webgl") return mockGl;
+      return null;
+    }
+  };
+
+  const target = attachCanvas(mockWebGlCanvas);
+  assert.equal(target.isWebGL(), true);
+
+  const surf = new LaminaSurface(64, 64);
+  surf.clear(rgb(0, 255, 0));
+  target.present(surf);
+
+  assert.equal(texImage2DCalls, 1);
+  assert.equal(drawArraysCalls, 1);
+
+  surf.flush(mockWebGlCanvas);
+  assert.equal(texImage2DCalls, 2);
+  assert.equal(drawArraysCalls, 2);
+
+  target.destroy();
+  surf.free();
+});
+
 test("createLaminaBridge provides Web HAL WASM host imports", () => {
   const bridge = createLaminaBridge(null, () => ({ memory: new WebAssembly.Memory({ initial: 1 }) }));
   const imports = bridge.makeLaminaImports();
