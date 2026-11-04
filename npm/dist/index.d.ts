@@ -1,4 +1,10 @@
 export function getLaminaWasm(): any;
+export function createLaminaRenderer(canvasEl: any): {
+  isWebGL(): boolean;
+  render(rgbaBytes: ArrayBufferView, width: number, height: number): void;
+  destroy(): void;
+};
+export function createLaminaBridge(root?: any, getWasm?: () => any): any;
 
 export function rgba(r: number, g: number, b: number, a?: number): number;
 export function rgb(r: number, g: number, b: number): number;
@@ -7,11 +13,18 @@ export function colorG(c: number): number;
 export function colorB(c: number): number;
 export function colorA(c: number): number;
 
+export function attachCanvas(canvasEl: any): {
+  isWebGL(): boolean;
+  present(surface: LaminaSurface): void;
+  destroy(): void;
+};
+
 export class LaminaSurface {
   width: number;
   height: number;
   wasmHandle: number;
-  constructor(width: number, height: number);
+  canvas?: any;
+  constructor(width: number, height: number, options?: { canvas?: any });
   free(): void;
   clear(color?: number): this;
   fill(x: number, y: number, w: number, h: number, color: number): this;
@@ -21,6 +34,7 @@ export class LaminaSurface {
   pick(x: number, y: number): number;
   getPixels(): Uint32Array;
   getClampedPixels(): Uint8ClampedArray;
+  flush(targetCanvas?: any): this;
 }
 
 export class ViewportController {

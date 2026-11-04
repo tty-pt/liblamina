@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ViewportController, LaminaSurface, FlexNode, rgba, rgb, colorR, colorG, colorB, colorA, version } from "../dist/index.js";
+import { ViewportController, LaminaSurface, FlexNode, attachCanvas, createLaminaBridge, rgba, rgb, colorR, colorG, colorB, colorA, version } from "../dist/index.js";
 
 test("ViewportController worldToScreen and screenToWorld coordinate transformations", () => {
   const vp = new ViewportController(800, 600);
@@ -89,6 +89,53 @@ test("FlexNode calculates nested flexbox layout trees in pure C", () => {
   assert.equal(contentBounds.height, 380);
 
   root.free();
+});
+
+test("attachCanvas and LaminaSurface.flush integrate with canvas targets", () => {
+  let putImageDataCalls = 0;
+  const mockCtx = {
+    putImageData(imgData, x, y) {
+      putImageDataCalls++;
+      assert.equal(imgData.width, 32);
+      assert.equal(imgData.height, 32);
+      assert.equal(x, 0);
+      assert.equal(y, 0);
+    }
+  };
+  const mockCanvas = {
+    width: 32,
+    height: 32,
+    getContext(type) {
+      if (type === "2d") return mockCtx;
+      return null;
+    }
+  };
+
+  const surf = new LaminaSurface(32, 32, { canvas: mockCanvas });
+  surf.clear(rgb(255, 0, 0));
+  surf.flush();
+  assert.equal(putImageDataCalls, 1);
+
+  const target = attachCanvas(mockCanvas);
+  assert.equal(target.isWebGL(), false);
+  target.present(surf);
+  assert.equal(putImageDataCalls, 2);
+
+  target.destroy();
+  surf.free();
+});
+
+test("createLaminaBridge provides Web HAL WASM host imports", () => {
+  const bridge = createLaminaBridge(null, () => ({ memory: new WebAssembly.Memory({ initial: 1 }) }));
+  const imports = bridge.makeLaminaImports();
+  assert.ok(typeof imports.lam_canvas_flush === "function");
+  assert.ok(typeof imports.lam_flush === "function");
+  assert.ok(typeof imports.lam_fill === "function");
+  assert.ok(typeof imports.lam_tile_draw === "function");
+
+  // Call flush with null canvas (should safely return without crashing)
+  imports.lam_canvas_flush(0, 10, 10);
+  bridge.destroy();
 });
 
 test("version returns 1.0.1", () => {

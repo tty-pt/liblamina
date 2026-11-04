@@ -1,4 +1,9 @@
 import { loadWasmModule, loadNativeAddon, getSubstrate } from "@tty-pt/stele";
+import { createLaminaRenderer } from "./renderer.js";
+import { createLaminaBridge } from "./bridge.js";
+
+export { createLaminaRenderer } from "./renderer.js";
+export { createLaminaBridge } from "./bridge.js";
 
 const nativeBinding = loadNativeAddon(import.meta.url, "lamina");
 let wasmInstance = null;
@@ -37,20 +42,45 @@ export function colorA(c) {
 }
 
 /**
+ * attachCanvas: Creates an automatic hardware-accelerated WebGL / 2D renderer target for a canvas.
+ */
+export function attachCanvas(canvasEl) {
+  const renderer = createLaminaRenderer(canvasEl);
+  return {
+    isWebGL: () => renderer.isWebGL(),
+    present: (surface) => {
+      renderer.render(surface.getClampedPixels(), surface.width, surface.height);
+    },
+    destroy: () => renderer.destroy()
+  };
+}
+
+/**
  * LaminaSurface: Pure-C immediate-mode 2D software framebuffer
  */
 export class LaminaSurface {
-  constructor(width, height) {
+  constructor(width, height, options = {}) {
     this.width = width;
     this.height = height;
+    this.canvas = options.canvas || null;
+    this._renderer = null;
+
     const wasm = getLaminaWasm();
     this.wasmHandle = wasm.exports.lamina_surface_new(width, height);
     if (!this.wasmHandle) {
       throw new Error(`Failed to allocate LaminaSurface(${width}x${height})`);
     }
+
+    if (this.canvas) {
+      this._renderer = createLaminaRenderer(this.canvas);
+    }
   }
 
   free() {
+    if (this._renderer) {
+      this._renderer.destroy();
+      this._renderer = null;
+    }
     if (this.wasmHandle) {
       const wasm = getLaminaWasm();
       wasm.exports.lamina_surface_free(this.wasmHandle);
@@ -105,6 +135,19 @@ export class LaminaSurface {
     const ptr = wasm.exports.lamina_surface_get_pixels(this.wasmHandle);
     const mem = (wasm.exports.memory || getSubstrate().memory).buffer;
     return new Uint8ClampedArray(mem, ptr, this.width * this.height * 4);
+  }
+
+  flush(targetCanvas = this.canvas) {
+    if (!targetCanvas) {
+      throw new Error("No canvas element specified for LaminaSurface.flush()");
+    }
+    if (!this._renderer || this.canvas !== targetCanvas) {
+      if (this._renderer) this._renderer.destroy();
+      this.canvas = targetCanvas;
+      this._renderer = createLaminaRenderer(targetCanvas);
+    }
+    this._renderer.render(this.getClampedPixels(), this.width, this.height);
+    return this;
   }
 }
 
