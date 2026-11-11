@@ -844,24 +844,36 @@ void main() {
 	vec3 sRip = chaff_sample_grad_2d(pRipple, 1u, 24u, 0x9E37u);
 	float wRip = sRip.x;
 
-	// High-fidelity wave surface normal combining macro, mid, capillary, and micro-facet slopes
-	vec2 gradMacro = sMacro.yz * 4.32;
-	vec2 gradMid   = sMid.yz * 4.48;
-	vec2 gradCap   = sCap.yz * 0.42;
-	vec2 gradRip   = sRip.yz * 0.36;
+	// Distance Nyquist band-limiting weights across wave octaves:
+	// - Micro-facets (1u) fade out over 250..700 world units
+	// - Capillary ripples (4u) fade out over 400..1200 world units
+	// - Mid-frequency wind chop (16u) fades out over 1200..4500 world units
+	// - Macro oceanic swells (64u) remain active across regional and orbital distances
+	float nyqRip   = clamp(1.0 - (vDistance - 250.0) / 450.0, 0.0, 1.0);
+	float nyqCap   = clamp(1.0 - (vDistance - 400.0) / 800.0, 0.0, 1.0);
+	float nyqMid   = clamp(1.0 - (vDistance - 1200.0) / 3300.0, 0.0, 1.0);
+	float nyqMacro = clamp(1.0 - (vDistance - 8000.0) / 32000.0, 0.25, 1.0);
+
+	// High-fidelity wave surface normal combining Nyquist-filtered macro, mid, capillary, and micro-facet slopes
+	vec2 gradMacro = sMacro.yz * (4.32 * nyqMacro);
+	vec2 gradMid   = sMid.yz * (4.48 * nyqMid);
+	vec2 gradCap   = sCap.yz * (0.42 * nyqCap);
+	vec2 gradRip   = sRip.yz * (0.36 * nyqRip);
 	vec2 waveGrad  = gradMacro + gradMid + gradCap + gradRip;
 	vec3 localWaveNormal = vec3(-waveGrad.x, -waveGrad.y, 1.0);
 
 	// Torus surface normal blending
 	vec3 waveNormal = normalize(localWaveNormal + vTorusNormal * 0.7);
 
-	// 2. Directional Sun Lighting on Wave Facets & Specular Sun Glints
+	// 2. Directional Sun Lighting on Wave Facets & Distance-Adaptive Specular Sun Glints
 	float diffuseSun = clamp(dot(waveNormal, sunDir), 0.0, 1.0);
 	vec3 halfVec = normalize(sunDir + viewDir);
-	float specSun = pow(clamp(dot(waveNormal, halfVec), 0.0, 1.0), 192.0);
+	float specExp = mix(24.0, 192.0, nyqCap);
+	float specStrength = mix(0.45, 1.0, nyqMid);
+	float specSun = pow(clamp(dot(waveNormal, halfVec), 0.0, 1.0), specExp) * specStrength;
 
 	// 3. Volumetric Optical Depth ("Ocular Esgotation"): true slant path length through fluid
-	vec3 nUp = vec3(0.0, 0.0, 1.0);
+	vec3 nUp = normalize(mix(vec3(0.0, 0.0, 1.0), vTorusNormal, clamp(vDistance / 8000.0, 0.0, 1.0)));
 	float slantPath = vWaterDepth / max(0.25, dot(viewDir, nUp));
 
 	// Procedural Animated Caustics on Illuminated Shallow Seabed (d < 4.0m)
@@ -1082,14 +1094,14 @@ function computeMVP(width, height, cp) {
 	const view = mat4Create();
 	mat4LookAt(view, eye, target, up);
 
-	const zoom = (dist > 0) ? (LAM_DIORAMA_CAM_DIST / dist) : 1.0;
-	const scale = LAM_DIORAMA_SCALE * zoom;
-
-	const hw = (width || 640) / (2.0 * scale);
-	const hh = (height || 480) / (2.0 * scale);
+	const fovDeg = (cp && cp.length >= 7 && cp[6] > 0) ? cp[6] : (cam3D.fov > 0 ? cam3D.fov : 45.0);
+	const fovRad = fovDeg * Math.PI / 180.0;
+	const aspect = (width || 640) / (height || 480);
+	const nearZ = Math.max(2.0, dist * 0.005);
+	const farZ = Math.max(200000.0, dist * 20.0);
 
 	const proj = mat4Create();
-	mat4Ortho(proj, -hw, hw, -hh, hh, LAM_CAM_ORTHO_NEAR, LAM_CAM_ORTHO_FAR);
+	mat4Perspective(proj, fovRad, aspect, nearZ, farZ);
 
 	const mvp = mat4Create();
 	mat4Multiply(mvp, proj, view);
@@ -2059,11 +2071,6 @@ export function createLaminaBridge(root, getWasm) {
 					const mvp = computeMVP(canvasEl.width, canvasEl.height);
 					const eye = mvp.eye;
 
-					const pitchDeg = (cam3D && cam3D.pitch > 0) ? cam3D.pitch : 55.0;
-					const pitchRad = pitchDeg * Math.PI / 180.0;
-					const sinP = Math.sin(pitchRad);
-					const cosP = Math.cos(pitchRad);
-
 					const f32 = new Float32Array(exports.memory.buffer, uptr, count * 10);
 					const u32 = new Uint32Array(exports.memory.buffer, uptr, count * 10);
 
@@ -2089,7 +2096,7 @@ export function createLaminaBridge(root, getWasm) {
 						const ta = ((tint >> 24) & 0xFF) / 255.0;
 
 						const hw = w * 0.5;
-						const h3D = h / cosP;
+						const h3D = h;
 						const baseZ = z;
 
 						vertData[vi++] = x - hw; vertData[vi++] = y; vertData[vi++] = baseZ;
