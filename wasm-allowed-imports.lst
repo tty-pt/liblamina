@@ -1,4 +1,8 @@
 lamina.lam_canvas_flush
+lamina.lam_cam_set_3d
+lamina.lam_cam_set_2d
+lamina.lam_terrain_mesh_flush
+lamina.lam_billboard_batch_flush
 lamina.lam_fill
 lamina.lam_tile_draw
 lamina.lam_flush
@@ -30,3 +34,6 @@ webgl.glUniformMatrix4fv
 webgl.glDeleteShader
 webgl.glDeleteProgram
 webgl.glDeleteBuffer
+lamina.lam_shader_register
+lamina.lam_shader_bind
+lamina.lam_shader_uniforms
