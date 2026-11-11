@@ -33,6 +33,10 @@ const shaderDefs = new Map();
 let nextShaderId = 1;
 let activeShaderId = 0;
 
+const imageIdsByUrl = new Map();
+const imageCache = new Map();
+let nextImageId = 1;
+
 function compileProgram(gl, vsSrc, fsSrc) {
 	try {
 		const vs = gl.createShader(gl.VERTEX_SHADER);
@@ -262,7 +266,79 @@ export function createLaminaBridge(root, getWasm) {
 				lam_billboard_batch_flush() {},
 				lam_fill() {},
 				lam_tile_draw() {},
-				lam_flush() {}
+				lam_flush() {},
+				lam_image_request(url_ptr) {
+					const exports = getWasm();
+					if (!exports || !exports.memory) return 0;
+					const mem = new Uint8Array(exports.memory.buffer);
+					let p = url_ptr >>> 0, url = "";
+					while (p < mem.length && mem[p] !== 0) url += String.fromCharCode(mem[p++]);
+					if (!url) return 0;
+					if (imageIdsByUrl.has(url)) return imageIdsByUrl.get(url);
+
+					const id = nextImageId++;
+					imageIdsByUrl.set(url, id);
+					const rec = { status: 0, w: 0, h: 0, data: null };
+					imageCache.set(id, rec);
+
+					if (typeof Image !== 'undefined') {
+						const img = new Image();
+						img.decoding = 'async';
+						img.onload = () => {
+							try {
+								const w = img.naturalWidth || img.width || 0;
+								const h = img.naturalHeight || img.height || 0;
+								if (w > 0 && h > 0) {
+									let off = null;
+									if (typeof OffscreenCanvas !== 'undefined') {
+										off = new OffscreenCanvas(w, h);
+									} else if (typeof document !== 'undefined' && document.createElement) {
+										off = document.createElement('canvas');
+										off.width = w;
+										off.height = h;
+									}
+									if (off) {
+										const ctx = off.getContext('2d');
+										if (ctx) {
+											ctx.clearRect(0, 0, w, h);
+											ctx.drawImage(img, 0, 0);
+											const idata = ctx.getImageData(0, 0, w, h);
+											rec.w = w;
+											rec.h = h;
+											rec.data = new Uint8Array(idata.data.buffer.slice(0));
+											rec.status = 1;
+											kickRender();
+											return;
+										}
+									}
+								}
+								rec.status = 2;
+							} catch (e) {
+								rec.status = 2;
+							}
+						};
+						img.onerror = () => { rec.status = 2; };
+						img.src = url;
+					}
+					return id;
+				},
+				lam_image_read(img_id, dst_ptr, max_bytes, out_w_ptr, out_h_ptr) {
+					const exports = getWasm();
+					if (!exports || !exports.memory) return 0;
+					const rec = imageCache.get(img_id >>> 0);
+					if (!rec || rec.status !== 1 || !rec.data) return 0;
+					const buf = exports.memory.buffer;
+					const dv = new DataView(buf);
+					if (out_w_ptr) dv.setUint32(out_w_ptr >>> 0, rec.w >>> 0, true);
+					if (out_h_ptr) dv.setUint32(out_h_ptr >>> 0, rec.h >>> 0, true);
+					const need = rec.data.byteLength;
+					const uptr = dst_ptr >>> 0;
+					if (uptr && (max_bytes >>> 0) >= need && uptr + need <= buf.byteLength) {
+						new Uint8Array(buf, uptr, need).set(rec.data);
+						return 1;
+					}
+					return 0;
+				}
 			};
 		},
 		destroy() {}

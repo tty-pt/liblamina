@@ -141,6 +141,13 @@ void lam_terrain_mesh_flush(const void *color_rgba, const int16_t *height_i16,
 __attribute__((import_module("lamina"), import_name("lam_billboard_batch_flush")))
 void lam_billboard_batch_flush(const void *billboard_data, uint32_t count, const void *atlas_ptr);
 
+__attribute__((import_module("lamina"), import_name("lam_image_request")))
+uint32_t lam_image_request(const char *url);
+
+__attribute__((import_module("lamina"), import_name("lam_image_read")))
+uint32_t lam_image_read(uint32_t img_id, void *dst_rgba, uint32_t max_bytes,
+                        uint32_t *out_w, uint32_t *out_h);
+
 #else /* !__wasm__ */
 
 /**
@@ -268,6 +275,13 @@ static inline void lam_terrain_mesh_flush(const void *c, const int16_t *h,
 
 static inline void lam_billboard_batch_flush(const void *b, uint32_t count, const void *atlas)
 { (void)b; (void)count; (void)atlas; }
+
+static inline uint32_t lam_image_request(const char *url)
+{ (void)url; return 0; }
+
+static inline uint32_t lam_image_read(uint32_t img_id, void *dst_rgba, uint32_t max_bytes,
+                                      uint32_t *out_w, uint32_t *out_h)
+{ (void)img_id; (void)dst_rgba; (void)max_bytes; (void)out_w; (void)out_h; return 0; }
 
 static inline void lam_cam_set_3d_7_(float tx, float ty, float tz, float d, float p, float y, float f)
 { (void)tx; (void)ty; (void)tz; (void)d; (void)p; (void)y; (void)f; }

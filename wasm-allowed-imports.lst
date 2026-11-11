@@ -57,3 +57,5 @@ webgl.glDeleteBuffer
 lamina.lam_shader_register
 lamina.lam_shader_bind
 lamina.lam_shader_uniforms
+lamina.lam_image_request
+lamina.lam_image_read
