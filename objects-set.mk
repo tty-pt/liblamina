@@ -1,1 +1,15 @@
 CFLAGS-liblamina-o := -fPIC
+CFLAGS-glfw-o := -fPIC
+CFLAGS-img-o := -fPIC
+CFLAGS-png-o := -fPIC
+CFLAGS-tile-o := -fPIC
+CFLAGS-cam-o := -fPIC
+CFLAGS-font-o := -fPIC
+CFLAGS-ui-o := -fPIC
+CFLAGS-ui-style-o := -fPIC
+CFLAGS-ui-cache-o := -fPIC
+CFLAGS-shadow-o := -fPIC
+CFLAGS-input-o := -fPIC
+CFLAGS-input-glfw-o := -fPIC
+CFLAGS-fb-o := -fPIC
+CFLAGS-input-dev-o := -fPIC

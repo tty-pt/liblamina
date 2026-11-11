@@ -105,12 +105,13 @@ typedef struct {
  * @param yaw_deg            Camera yaw rotation angle in degrees
  * @param fov_deg            Field of view in degrees (e.g. 45.0)
  */
-void lam_cam_set_3d(float target_x, float target_y, float distance,
-                    float pitch_deg, float yaw_deg, float fov_deg);
+void (lam_cam_set_3d)(float target_x, float target_y, float distance,
+                      float pitch_deg, float yaw_deg, float fov_deg);
 
 /**
  * @brief Restore classic 2D orthographic rendering mode.
  */
+#undef lam_cam_set_2d
 void lam_cam_set_2d(void);
 
 /**
