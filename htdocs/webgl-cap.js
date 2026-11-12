@@ -42,6 +42,8 @@ export function createWebGlBridge(root, getWasm) {
 		return c;
 	}
 
+	let parallelCompileExt = undefined;
+
 	function getGl() {
 		if (gl && glCanvas && glCanvas.isConnected !== false) return gl;
 		const canvas = findCanvas();
@@ -49,6 +51,9 @@ export function createWebGlBridge(root, getWasm) {
 			const glOpts = { preserveDrawingBuffer: true, alpha: true, antialias: true, depth: true };
 			gl = canvas.getContext('webgl2', glOpts) || canvas.getContext('webgl', glOpts);
 			glCanvas = canvas;
+			parallelCompileExt = (gl && typeof gl.getExtension === 'function')
+				? gl.getExtension('KHR_parallel_shader_compile')
+				: null;
 			if (!kicked && typeof requestAnimationFrame === 'function') {
 				kicked = true;
 				const fn = getExport(getWasm ? getWasm() : null, ['wasm_canvas_render']);
@@ -65,6 +70,7 @@ export function createWebGlBridge(root, getWasm) {
 		destroy() {
 			gl = null;
 			glCanvas = null;
+			parallelCompileExt = undefined;
 		},
 		makeImports() {
 			return {
@@ -139,6 +145,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const s = shaders[shaderId];
 					if (!c || !s) return 0;
+					if (pname === 0x91B1 && !parallelCompileExt) return 1;
 					const res = c.getShaderParameter(s, pname);
 					return res ? 1 : 0;
 				},
@@ -164,6 +171,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const p = programs[programId];
 					if (!c || !p) return 0;
+					if (pname === 0x91B1 && !parallelCompileExt) return 1;
 					const res = c.getProgramParameter(p, pname);
 					return res ? 1 : 0;
 				},
