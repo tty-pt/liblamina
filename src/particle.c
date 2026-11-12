@@ -271,8 +271,8 @@ size_t lam_particle_gather(const lam_particle_sys_t *ps,
 		d->norm_age = t;
 		d->rgba = rgba;
 		d->kind = p->kind;
-		d->pad[0] = 0;
-		d->pad[1] = 0;
+		d->pad[0] = (uint8_t)(p->seed & 0xFFu);
+		d->pad[1] = (uint8_t)((p->seed >> 8) & 0xFFu);
 		d->pad[2] = 0;
 	}
 	return written;

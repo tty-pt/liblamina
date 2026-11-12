@@ -53,6 +53,7 @@ typedef unsigned char GLboolean;
 
 #define GL_COMPILE_STATUS         0x8B81
 #define GL_LINK_STATUS            0x8B82
+#define GL_COMPLETION_STATUS_KHR  0x91B1
 
 #define GL_DEPTH_TEST             0x0B71
 #define GL_BLEND                  0x0BE2

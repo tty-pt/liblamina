@@ -112,18 +112,23 @@ export function createLaminaBridge(root, getWasm) {
 
 	function pickCanvas(width, height) {
 		const list = allCanvases();
-		let first = null, fit = null;
+		let first = null, fit = null, fixed = null;
 		for (const c of list) {
 			if (!first) first = c;
-			if (c.width === width && c.height === height) return c;
-			if (!fit && c.hasAttribute && c.hasAttribute('data-bud-canvas-fit')) fit = c;
+			const isFit = !!(c.hasAttribute && c.hasAttribute('data-bud-canvas-fit'));
+			if (!isFit && c.width === width && c.height === height) return c;
+			if (!fixed && !isFit) fixed = c;
+			if (!fit && isFit) fit = c;
+		}
+		if (fixed && (!fit || (width <= 320 && height <= 320))) {
+			return fixed;
 		}
 		if (fit && width > 0 && height > 0) {
 			fit.width = width;
 			fit.height = height;
 			return fit;
 		}
-		return fit || first;
+		return fixed || fit || first;
 	}
 
 	function targetFor(el) {
