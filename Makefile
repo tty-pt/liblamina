@@ -20,7 +20,7 @@ LDLIBS-Linux += -Wl,--no-as-needed -lstele -Wl,--as-needed
 LDLIBS += ${LDLIBS-${uname}}
 
 obj-y := glfw img png
-obj-y += tile font cam
+obj-y += tile font cam particle
 obj-y += ui ui-style ui-cache shadow
 obj-y += input input-glfw
 liblamina-obj-y := ${obj-y:%=src/%.o}
@@ -56,7 +56,8 @@ TEST_BINS := ${TEST_DIR}/test_core${EXE} \
 	${TEST_DIR}/test_ui_layout${EXE} \
 	${TEST_DIR}/test_ui_style${EXE} \
 	${TEST_DIR}/test_ui_render${EXE} \
-	${TEST_DIR}/test_integration${EXE}
+	${TEST_DIR}/test_integration${EXE} \
+	${TEST_DIR}/test_particle${EXE}
 
 ${TEST_DIR}:
 	@mkdir -p ${TEST_DIR}/fixtures 2>/dev/null || true
@@ -101,6 +102,10 @@ ${TEST_DIR}/test_integration${EXE}: ${TEST_DIR} ${TEST_DIR}/test_integration.c l
 	${cc} -o $@ ${TEST_DIR}/test_integration.c ${CFLAGS} ${TEST_CFLAGS} \
 		${LDFLAGS} ${TEST_LDFLAGS} ${TEST_LDLIBS}
 
+${TEST_DIR}/test_particle${EXE}: ${TEST_DIR} ${TEST_DIR}/test_particle.c lib/liblamina.${SO}
+	${cc} -o $@ ${TEST_DIR}/test_particle.c ${CFLAGS} ${TEST_CFLAGS} \
+		${LDFLAGS} ${TEST_LDFLAGS} ${TEST_LDLIBS}
+
 test-build: lib/liblamina.${SO} ${TEST_DIR}/fixtures/test_texture.png ${TEST_BINS}
 
 test: test-build
@@ -129,6 +134,8 @@ run-tests:
 	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_ui_render
 	@echo "Running test_integration..."
 	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_integration
+	@echo "Running test_particle..."
+	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_particle
 	@echo "All tests passed!"
 
 .PHONY: test test-build run-tests

@@ -12,6 +12,7 @@
 /tests/test_ui_style
 /tests/test_ui_render
 /tests/test_integration
+/tests/test_particle
 !/tests/*.c
 /examples/*
 !/examples/*.c

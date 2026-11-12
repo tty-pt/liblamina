@@ -297,6 +297,73 @@ static inline void lam_cam_set_2d_noop_(void) {}
 
 #endif /* !__wasm__ */
 
+/*───────────────────────────────────────────────*
+ *      3D BALLISTIC & ADVECTED PARTICLE API     *
+ *───────────────────────────────────────────────*/
+
+/**
+ * @brief Optional surface/floor elevation callback: returns surface Z at (wx, wy).
+ */
+typedef float (*lam_particle_surface_fn)(void *user_ctx, float wx, float wy);
+
+typedef struct {
+	float    x, y, z;          /* 3D world position */
+	float    vx, vy, vz;       /* 3D velocity (units/sec) */
+	float    size0, size1;     /* Start and end particle quad size */
+	float    age, max_age;     /* Current age and lifetime (seconds) */
+	float    drag;             /* Linear fluid/air drag coefficient (1/sec) */
+	float    gravity_scale;    /* Multiplier on system gravity (positive = falls, negative = rises) */
+	float    restitution;      /* Surface bounce restitution (< 0 = kill on surface contact, 0 = slide/settle, > 0 = bounce) */
+	uint32_t rgba0, rgba1;     /* Start and end RGBA tint (0xRRGGBBAA) */
+	uint8_t  kind;             /* Caller-defined material/behavior tag */
+	uint8_t  flags;            /* Bit 0: active */
+	uint16_t seed;             /* Per-particle deterministic phase seed */
+} lam_particle_t;
+
+typedef struct {
+	float    x, y, z;          /* Emission origin */
+	float    spread_x, spread_y, spread_z; /* Position jitter box half-extents */
+	float    dir_x, dir_y, dir_z;          /* Mean emission direction vector */
+	float    speed_min, speed_max;         /* Initial speed range */
+	float    cone_spread;      /* Angular velocity cone spread (0 = laser, 1 = hemisphere) */
+	float    size0_min, size0_max;         /* Start size range */
+	float    size1_min, size1_max;         /* End size range */
+	float    life_min, life_max;           /* Lifetime range in seconds */
+	float    drag;             /* Air/fluid drag coefficient */
+	float    gravity_scale;    /* Gravity multiplier */
+	float    restitution;      /* Surface contact behavior */
+	uint32_t rgba0, rgba1;     /* Start and end RGBA colors (0xRRGGBBAA) */
+	uint32_t count;            /* Number of particles to emit in this burst */
+	uint8_t  kind;             /* Material tag */
+} lam_particle_emitter_t;
+
+typedef struct {
+	float    x, y, z;          /* Interpolated 3D world position */
+	float    size;             /* Current interpolated world size */
+	float    norm_age;         /* Normalized age t in [0..1] */
+	uint32_t rgba;             /* Current interpolated & envelope-faded RGBA (0xRRGGBBAA) */
+	uint8_t  kind;             /* Material tag */
+	uint8_t  pad[3];
+} lam_particle_draw_t;
+
+typedef struct lam_particle_sys lam_particle_sys_t;
+
+lam_particle_sys_t *lam_particle_sys_create(size_t capacity, float default_gravity_z);
+void lam_particle_sys_destroy(lam_particle_sys_t *ps);
+void lam_particle_sys_clear(lam_particle_sys_t *ps);
+
+size_t lam_particle_emit(lam_particle_sys_t *ps, const lam_particle_emitter_t *em);
+
+void lam_particle_step(lam_particle_sys_t *ps, float dt,
+                       float wind_vx, float wind_vy, float wind_vz,
+                       lam_particle_surface_fn surface_fn, void *user_ctx);
+
+size_t lam_particle_gather(const lam_particle_sys_t *ps,
+                           lam_particle_draw_t *out_draw, size_t max_out);
+
+size_t lam_particle_active_count(const lam_particle_sys_t *ps);
+size_t lam_particle_capacity(const lam_particle_sys_t *ps);
+
 #ifdef __cplusplus
 }
 #endif
