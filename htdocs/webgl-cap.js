@@ -344,7 +344,9 @@ export function createWebGlBridge(root, getWasm) {
 		if (gl && glCanvas && glCanvas.isConnected !== false && (!canvas || canvas === glCanvas)) return gl;
 		if (canvas) {
 			const prevCanvas = glCanvas;
-			const glOpts = { preserveDrawingBuffer: true, alpha: true, antialias: true, depth: true };
+			/* Default framebuffer is single-sampled: scenes antialias in their own multisampled FBO and resolve-blit into it
+			 * (glBlitFramebuffer into a multisampled draw framebuffer is INVALID_OPERATION). */
+			const glOpts = { preserveDrawingBuffer: true, alpha: true, antialias: false, depth: true };
 			gl = canvas.getContext('webgl2', glOpts) || canvas.getContext('webgl', glOpts);
 			glCanvas = canvas;
 			parallelCompileExt = (gl && typeof gl.getExtension === 'function')
