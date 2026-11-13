@@ -28,3 +28,4 @@ jobs:
       ABUILD_PRIVATE_KEY: ${{ secrets.ABUILD_PRIVATE_KEY }}
       ABUILD_PUBLIC_KEY: ${{ secrets.ABUILD_PUBLIC_KEY }}
       TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
