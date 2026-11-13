@@ -91,6 +91,16 @@ typedef unsigned int GLbitfield;
 #define GL_RED                    0x1903
 #define GL_DEPTH_COMPONENT        0x1902
 #define GL_DEPTH_COMPONENT32F     0x8CAC
+#define GL_DEPTH_STENCIL          0x84F9
+#define GL_DEPTH32F_STENCIL8      0x8CAD
+#define GL_FLOAT_32_UNSIGNED_INT_24_8_REV 0x8DAD
+#define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
+#define GL_STENCIL_TEST           0x0B90
+#define GL_STENCIL_BUFFER_BIT     0x00000400
+#define GL_ALWAYS                 0x0207
+#define GL_EQUAL                  0x0202
+#define GL_KEEP                   0x1E00
+#define GL_REPLACE                0x1E01
 
 #define GL_POLYGON_OFFSET_FILL    0x8037
 
@@ -271,6 +281,18 @@ void glBindRenderbuffer(GLenum target, GLuint rb);
 __attribute__((import_module("webgl"), import_name("glRenderbufferStorageMultisample")))
 void glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
 
+__attribute__((import_module("webgl"), import_name("glStencilFunc")))
+void glStencilFunc(GLenum func, GLint ref, GLuint mask);
+
+__attribute__((import_module("webgl"), import_name("glStencilOp")))
+void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass);
+
+__attribute__((import_module("webgl"), import_name("glStencilMask")))
+void glStencilMask(GLuint mask);
+
+__attribute__((import_module("webgl"), import_name("glClearStencil")))
+void glClearStencil(GLint s);
+
 __attribute__((import_module("webgl"), import_name("glBlitFramebuffer")))
 void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter);
 
@@ -335,6 +357,10 @@ static inline GLuint glCreateRenderbuffer(void) { return 1; }
 static inline void glDeleteRenderbuffer(GLuint rb) { (void)rb; }
 static inline void glBindRenderbuffer(GLenum target, GLuint rb) { (void)target; (void)rb; }
 static inline void glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) { (void)target; (void)samples; (void)internalformat; (void)width; (void)height; }
+static inline void glStencilFunc(GLenum func, GLint ref, GLuint mask) { (void)func; (void)ref; (void)mask; }
+static inline void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass) { (void)sfail; (void)dpfail; (void)dppass; }
+static inline void glStencilMask(GLuint mask) { (void)mask; }
+static inline void glClearStencil(GLint s) { (void)s; }
 static inline void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)dx0; (void)dy0; (void)dx1; (void)dy1; (void)mask; (void)filter; }
 
 #endif

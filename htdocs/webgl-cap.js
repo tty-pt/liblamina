@@ -434,6 +434,22 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					if (c) c.polygonOffset(factor, units);
 				},
+				glStencilFunc(func, ref, mask) {
+					const c = getGl();
+					if (c) c.stencilFunc(func, ref, mask >>> 0);
+				},
+				glStencilOp(sfail, dpfail, dppass) {
+					const c = getGl();
+					if (c) c.stencilOp(sfail, dpfail, dppass);
+				},
+				glStencilMask(mask) {
+					const c = getGl();
+					if (c) c.stencilMask(mask >>> 0);
+				},
+				glClearStencil(s) {
+					const c = getGl();
+					if (c) c.clearStencil(s);
+				},
 				glCreateShader(type) {
 					const c = getGl();
 					if (!c) return 0;

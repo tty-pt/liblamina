@@ -70,3 +70,7 @@ webgl.glDeleteRenderbuffer
 webgl.glBindRenderbuffer
 webgl.glRenderbufferStorageMultisample
 webgl.glBlitFramebuffer
+webgl.glStencilFunc
+webgl.glStencilOp
+webgl.glStencilMask
+webgl.glClearStencil
