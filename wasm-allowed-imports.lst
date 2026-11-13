@@ -59,3 +59,14 @@ lamina.lam_shader_bind
 lamina.lam_shader_uniforms
 lamina.lam_image_request
 lamina.lam_image_read
+webgl.glCreateFramebuffer
+webgl.glDeleteFramebuffer
+webgl.glBindFramebuffer
+webgl.glFramebufferTexture2D
+webgl.glFramebufferRenderbuffer
+webgl.glCheckFramebufferStatus
+webgl.glCreateRenderbuffer
+webgl.glDeleteRenderbuffer
+webgl.glBindRenderbuffer
+webgl.glRenderbufferStorageMultisample
+webgl.glBlitFramebuffer
