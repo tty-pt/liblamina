@@ -1,3 +1,12 @@
+## [1.1.0] - 2026-11-13
+
+- **WebGL Worker Offloading & Parallel Shader Compilation**:
+  - Unified native C 2D/3D engine with pure-C WebGL2 pass-through bridge, camera math, and standardized README.
+  - Added KHR_parallel_shader_compile support and offscreen canvas worker dispatch.
+  - Perspective camera projection, billboard alignment, and multi-scale water optics.
+- **Libstele v1.6.0 Substrate Alignment**:
+  - Upgraded substrate baseline to @tty-pt/stele@^1.6.0 (>=1.6.0).
+
 ## [1.0.1]
 
 - **Universal Substrate Migration (`libstele`)**:

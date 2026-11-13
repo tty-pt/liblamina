@@ -1,6 +1,6 @@
 {
   "name": "@tty-pt/lamina",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "description": "Universal Node.js and Browser bindings for liblamina 2D/3D immediate-mode canvas and WebGL graphics engine",
   "main": "dist/index.js",
@@ -31,10 +31,10 @@
     "test": "node --test tests/lamina.test.mjs"
   },
   "peerDependencies": {
-    "@tty-pt/stele": ">=1.5.0"
+    "@tty-pt/stele": ">=1.6.0"
   },
   "devDependencies": {
-    "@tty-pt/stele": "^1.5.1"
+    "@tty-pt/stele": "^1.6.0"
   },
   "keywords": [
     "lamina",

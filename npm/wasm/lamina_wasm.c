@@ -322,7 +322,7 @@ ISO_EXPORT(void, lamina_node_free, lamina_node_t *n)
  *            VERSION & METADATA                *
  *───────────────────────────────────────────────*/
 
-static const char LAMINA_VERSION_STR[] = "1.0.1";
+static const char LAMINA_VERSION_STR[] = "1.1.0";
 
 ISO_EXPORT(const char *, lamina_version, void)
 {

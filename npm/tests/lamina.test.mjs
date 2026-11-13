@@ -217,6 +217,6 @@ test("createLaminaBridge provides Web HAL WASM host imports", () => {
   bridge.destroy();
 });
 
-test("version returns 1.0.1", () => {
-  assert.equal(version(), "1.0.1");
+test("version returns 1.1.0", () => {
+  assert.equal(version(), "1.1.0");
 });
