@@ -1,0 +1,2 @@
+# The addon is camera math only (npm/native/lamina_napi.c includes no lamina header).
+# It must not link liblamina: that would drag the GL / GLFW / GLEW / X11 stack into the package.
