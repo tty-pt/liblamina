@@ -102,12 +102,33 @@ function initGlPipeline(gl) {
 export function createLaminaBridge(root, getWasm) {
 	const targets = new WeakMap();
 	const kicked = new WeakSet();
+	const globalScope = typeof window !== 'undefined' ? window : globalThis;
 
 	function allCanvases() {
-		const scope = root && root.querySelectorAll ? root : document;
-		let list = scope.querySelectorAll('[data-bud-canvas]');
-		if (!list.length && scope !== document) list = document.querySelectorAll('[data-bud-canvas]');
-		return list;
+		if (root && typeof root.querySelectorAll === 'function') {
+			let list = root.querySelectorAll('[data-bud-canvas]');
+			if (!list.length && typeof document !== 'undefined' && root !== document && typeof document.querySelectorAll === 'function') {
+				list = document.querySelectorAll('[data-bud-canvas]');
+			}
+			return list;
+		}
+		if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+			return document.querySelectorAll('[data-bud-canvas]');
+		}
+		if (globalScope.__stele_worker_canvases instanceof Map) {
+			const res = [];
+			for (const entry of globalScope.__stele_worker_canvases.values()) {
+				if (entry && entry.canvas) res.push(entry.canvas);
+			}
+			return res;
+		}
+		return [];
+	}
+
+	function isFitCanvas(c) {
+		if (!c) return false;
+		if (c.__stele_fit) return true;
+		return !!(c.hasAttribute && c.hasAttribute('data-bud-canvas-fit'));
 	}
 
 	function pickCanvas(width, height) {
@@ -115,7 +136,7 @@ export function createLaminaBridge(root, getWasm) {
 		let first = null, fit = null, fixed = null;
 		for (const c of list) {
 			if (!first) first = c;
-			const isFit = !!(c.hasAttribute && c.hasAttribute('data-bud-canvas-fit'));
+			const isFit = isFitCanvas(c);
 			if (!isFit && c.width === width && c.height === height) return c;
 			if (!fixed && !isFit) fixed = c;
 			if (!fit && isFit) fit = c;
@@ -229,6 +250,7 @@ export function createLaminaBridge(root, getWasm) {
 						gl.bindTexture(gl.TEXTURE_2D, t.glPipe.tex);
 						gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
 						gl.drawArrays(gl.TRIANGLES, 0, 6);
+						canvasEl.__stele_dirty = true;
 						return;
 					}
 
@@ -236,6 +258,7 @@ export function createLaminaBridge(root, getWasm) {
 						const clamped = new Uint8ClampedArray(exports.memory.buffer, uptr, byteLen);
 						const imgData = new ImageData(clamped, width, height);
 						t.canvas2d.putImageData(imgData, 0, 0);
+						canvasEl.__stele_dirty = true;
 					}
 				},
 				lam_shader_register(name_ptr, frag_ptr) {
@@ -286,6 +309,10 @@ export function createLaminaBridge(root, getWasm) {
 					const rec = { status: 0, w: 0, h: 0, data: null };
 					imageCache.set(id, rec);
 
+					const fetchUrl = (url.startsWith('/') && globalScope.__stele_origin)
+						? `${globalScope.__stele_origin}${url}`
+						: url;
+
 					if (typeof Image !== 'undefined') {
 						const img = new Image();
 						img.decoding = 'async';
@@ -323,7 +350,44 @@ export function createLaminaBridge(root, getWasm) {
 							}
 						};
 						img.onerror = () => { rec.status = 2; };
-						img.src = url;
+						img.src = fetchUrl;
+					} else if (typeof fetch === 'function' && typeof createImageBitmap === 'function' && typeof OffscreenCanvas !== 'undefined') {
+						fetch(fetchUrl)
+							.then((res) => {
+								if (!res.ok) throw new Error('HTTP ' + res.status);
+								return res.blob();
+							})
+							.then((blob) => createImageBitmap(blob))
+							.then((bmp) => {
+								try {
+									const w = bmp.width || 0;
+									const h = bmp.height || 0;
+									if (w > 0 && h > 0) {
+										const off = new OffscreenCanvas(w, h);
+										const ctx = off.getContext('2d');
+										if (ctx) {
+											ctx.clearRect(0, 0, w, h);
+											ctx.drawImage(bmp, 0, 0);
+											const idata = ctx.getImageData(0, 0, w, h);
+											rec.w = w;
+											rec.h = h;
+											rec.data = new Uint8Array(idata.data.buffer.slice(0));
+											rec.status = 1;
+											if (typeof bmp.close === 'function') bmp.close();
+											kickRender();
+											return;
+										}
+									}
+									if (typeof bmp.close === 'function') bmp.close();
+									rec.status = 2;
+								} catch (_) {
+									if (bmp && typeof bmp.close === 'function') bmp.close();
+									rec.status = 2;
+								}
+							})
+							.catch(() => {
+								rec.status = 2;
+							});
 					}
 					return id;
 				},
@@ -350,14 +414,17 @@ export function createLaminaBridge(root, getWasm) {
 	};
 }
 
-if (typeof window !== 'undefined') {
-	window.__wasm_capability_registry = window.__wasm_capability_registry || {};
-	window.__wasm_capability_registry.lamina = (root, getWasm) => {
-		const b = createLaminaBridge(root, getWasm);
-		return {
-			mount() { b.mount(); },
-			destroy() { b.destroy(); },
-			makeImports() { return b.makeLaminaImports(); }
-		};
+const _lamGlobal = typeof window !== 'undefined' ? window : globalThis;
+_lamGlobal.__wasm_capability_registry = _lamGlobal.__wasm_capability_registry || {};
+const _lamFactory = (root, getWasm) => {
+	const b = createLaminaBridge(root, getWasm);
+	return {
+		mount() { b.mount(); },
+		destroy() { b.destroy(); },
+		makeImports() { return b.makeLaminaImports(); }
 	};
+};
+_lamGlobal.__wasm_capability_registry.lamina = _lamFactory;
+if (typeof _lamGlobal.registerWasmCapability === 'function') {
+	_lamGlobal.registerWasmCapability('lamina', _lamFactory);
 }
