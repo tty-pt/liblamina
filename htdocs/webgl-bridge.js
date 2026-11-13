@@ -120,6 +120,12 @@ export function createWebGlBridge(root, getWasm) {
 	const bufferMeta = [null];
 	const textures = [null];
 	const textureMeta = [null];
+	const framebuffers = [null];
+	const framebufferMeta = [null];
+	const renderbuffers = [null];
+	const renderbufferMeta = [null];
+	let currentBoundFramebufferId = 0;
+	let currentBoundRenderbufferId = 0;
 	const uniformLocs = [null];
 	const uniformMeta = [null];
 	const globalScope = typeof window !== 'undefined' ? window : globalThis;
@@ -308,6 +314,29 @@ export function createWebGlBridge(root, getWasm) {
 			}
 			textures[i] = t;
 		}
+		for (let i = 1; i < renderbufferMeta.length; i++) {
+			const rm = renderbufferMeta[i];
+			if (!rm) { renderbuffers[i] = null; continue; }
+			const r = c.createRenderbuffer();
+			if (r && rm.width > 0 && rm.height > 0) {
+				c.bindRenderbuffer(c.RENDERBUFFER, r);
+				c.renderbufferStorageMultisample(c.RENDERBUFFER, rm.samples, rm.internalformat, rm.width, rm.height);
+			}
+			renderbuffers[i] = r;
+		}
+		for (let i = 1; i < framebufferMeta.length; i++) {
+			const fm = framebufferMeta[i];
+			if (!fm) { framebuffers[i] = null; continue; }
+			const f = c.createFramebuffer();
+			framebuffers[i] = f;
+			c.bindFramebuffer(c.FRAMEBUFFER, f);
+			for (const a of fm.attachments) {
+				if (a.rb) c.framebufferRenderbuffer(a.target, a.attachment, c.RENDERBUFFER, renderbuffers[a.id] || null);
+				else c.framebufferTexture2D(a.target, a.attachment, a.textarget, textures[a.id] || null, a.level);
+			}
+		}
+		c.bindFramebuffer(c.FRAMEBUFFER, null);
+		currentBoundFramebufferId = 0;
 	}
 
 	function getGl() {
@@ -798,6 +827,79 @@ export function createWebGlBridge(root, getWasm) {
 					const b = buffers[bufferId];
 					if (c && b) c.deleteBuffer(b);
 					buffers[bufferId] = null;
+				},
+				glCreateFramebuffer() {
+					const c = getGl();
+					if (!c) return 0;
+					framebuffers.push(c.createFramebuffer());
+					framebufferMeta.push({ attachments: [] });
+					return framebuffers.length - 1;
+				},
+				glDeleteFramebuffer(fbId) {
+					const c = getGl();
+					const f = framebuffers[fbId];
+					if (c && f) c.deleteFramebuffer(f);
+					if (fbId > 0 && fbId < framebuffers.length) { framebuffers[fbId] = null; framebufferMeta[fbId] = null; }
+				},
+				glBindFramebuffer(target, fbId) {
+					const c = getGl();
+					if (target === 0x8D40 || target === 0x8CA9) currentBoundFramebufferId = fbId;
+					if (c) c.bindFramebuffer(target, fbId > 0 ? (framebuffers[fbId] || null) : null);
+				},
+				glFramebufferTexture2D(target, attachment, textarget, texId, level) {
+					const c = getGl();
+					const fm = currentBoundFramebufferId ? framebufferMeta[currentBoundFramebufferId] : null;
+					if (fm) {
+						fm.attachments = fm.attachments.filter((a) => a.attachment !== attachment);
+						fm.attachments.push({ target, attachment, textarget, id: texId, level, rb: false });
+					}
+					if (c) c.framebufferTexture2D(target, attachment, textarget, texId > 0 ? (textures[texId] || null) : null, level);
+				},
+				glFramebufferRenderbuffer(target, attachment, rbtarget, rbId) {
+					const c = getGl();
+					const fm = currentBoundFramebufferId ? framebufferMeta[currentBoundFramebufferId] : null;
+					if (fm) {
+						fm.attachments = fm.attachments.filter((a) => a.attachment !== attachment);
+						fm.attachments.push({ target, attachment, textarget: 0, id: rbId, level: 0, rb: true });
+					}
+					if (c) c.framebufferRenderbuffer(target, attachment, rbtarget, rbId > 0 ? (renderbuffers[rbId] || null) : null);
+				},
+				glCheckFramebufferStatus(target) {
+					const c = getGl();
+					return c ? c.checkFramebufferStatus(target) : 0;
+				},
+				glCreateRenderbuffer() {
+					const c = getGl();
+					if (!c) return 0;
+					renderbuffers.push(c.createRenderbuffer());
+					renderbufferMeta.push({ samples: 0, internalformat: 0, width: 0, height: 0 });
+					return renderbuffers.length - 1;
+				},
+				glDeleteRenderbuffer(rbId) {
+					const c = getGl();
+					const r = renderbuffers[rbId];
+					if (c && r) c.deleteRenderbuffer(r);
+					if (rbId > 0 && rbId < renderbuffers.length) { renderbuffers[rbId] = null; renderbufferMeta[rbId] = null; }
+				},
+				glBindRenderbuffer(target, rbId) {
+					const c = getGl();
+					currentBoundRenderbufferId = rbId;
+					if (c) c.bindRenderbuffer(target, rbId > 0 ? (renderbuffers[rbId] || null) : null);
+				},
+				glRenderbufferStorageMultisample(target, samples, internalformat, width, height) {
+					const c = getGl();
+					const rm = currentBoundRenderbufferId ? renderbufferMeta[currentBoundRenderbufferId] : null;
+					if (rm) { rm.samples = samples; rm.internalformat = internalformat; rm.width = width; rm.height = height; }
+					if (c && typeof c.renderbufferStorageMultisample === 'function') {
+						c.renderbufferStorageMultisample(target, samples, internalformat, width, height);
+					}
+				},
+				glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter) {
+					const c = getGl();
+					if (c && typeof c.blitFramebuffer === 'function') {
+						c.blitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
+						if (glCanvas) glCanvas.__stele_dirty = true;
+					}
 				}
 			};
 		}
