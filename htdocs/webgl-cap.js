@@ -1,6 +1,11 @@
 /*
  * webgl-bridge.js — Browser WebAssembly bridge for WebGL 1/2 graphics.
  * Provides the "webgl" WASM import module.
+ *
+ * Offloads asynchronous GLSL shader compilation and program linking to a
+ * dedicated background WebGL Shader Compiler Worker (when Worker + OffscreenCanvas
+ * are available) so that heavy shader compilation never stalls the WASM simulation
+ * worker or UI interaction.
  */
 
 function readStr(memory, ptr, len) {
@@ -15,6 +20,93 @@ function getExport(exports, names) {
 	}
 	return null;
 }
+
+/* ── Self-Contained Shader Pre-Compiler Worker Script ── */
+const SHADER_WORKER_SOURCE = `
+let gl = null;
+let ext = null;
+const pending = [];
+let polling = false;
+
+function getCompilerGl() {
+	if (gl) return gl;
+	if (typeof OffscreenCanvas === 'undefined') return null;
+	try {
+		const c = new OffscreenCanvas(1, 1);
+		gl = c.getContext('webgl2') || c.getContext('webgl');
+		if (gl && typeof gl.getExtension === 'function') {
+			ext = gl.getExtension('KHR_parallel_shader_compile');
+		}
+	} catch (_) {
+		gl = null;
+	}
+	return gl;
+}
+
+function pollPending() {
+	polling = false;
+	if (!gl || pending.length === 0) return;
+	for (let i = pending.length - 1; i >= 0; i--) {
+		const item = pending[i];
+		if (ext) {
+			const done = gl.getProgramParameter(item.prog, 0x91B1);
+			if (!done) continue;
+		}
+		const ok = !!gl.getProgramParameter(item.prog, gl.LINK_STATUS);
+		gl.deleteProgram(item.prog);
+		gl.deleteShader(item.vs);
+		gl.deleteShader(item.fs);
+		pending.splice(i, 1);
+		self.postMessage({ type: 'webgl:compiled', programId: item.programId, rev: item.rev, ok });
+	}
+	if (pending.length > 0) {
+		polling = true;
+		setTimeout(pollPending, 8);
+	}
+}
+
+self.onmessage = (evt) => {
+	const msg = evt.data;
+	if (!msg || msg.type !== 'webgl:compile') return;
+	const c = getCompilerGl();
+	if (!c) {
+		self.postMessage({ type: 'webgl:compiled', programId: msg.programId, rev: msg.rev, ok: true });
+		return;
+	}
+	try {
+		const vs = c.createShader(c.VERTEX_SHADER);
+		const fs = c.createShader(c.FRAGMENT_SHADER);
+		const prog = c.createProgram();
+		if (!vs || !fs || !prog) {
+			if (vs) c.deleteShader(vs);
+			if (fs) c.deleteShader(fs);
+			if (prog) c.deleteProgram(prog);
+			self.postMessage({ type: 'webgl:compiled', programId: msg.programId, rev: msg.rev, ok: true });
+			return;
+		}
+		c.shaderSource(vs, msg.vsSrc || '');
+		c.compileShader(vs);
+		c.shaderSource(fs, msg.fsSrc || '');
+		c.compileShader(fs);
+		c.attachShader(prog, vs);
+		c.attachShader(prog, fs);
+		if (Array.isArray(msg.attribBinds)) {
+			for (const [idx, name] of msg.attribBinds) {
+				c.bindAttribLocation(prog, idx, name);
+			}
+		}
+		c.linkProgram(prog);
+		if (typeof c.flush === 'function') c.flush();
+		pending.push({ programId: msg.programId, rev: msg.rev, prog, vs, fs });
+		if (!polling) {
+			polling = true;
+			setTimeout(pollPending, 4);
+		}
+	} catch (_) {
+		self.postMessage({ type: 'webgl:compiled', programId: msg.programId, rev: msg.rev, ok: true });
+	}
+};
+`;
 
 export function createWebGlBridge(root, getWasm) {
 	let gl = null;
@@ -33,6 +125,61 @@ export function createWebGlBridge(root, getWasm) {
 	const globalScope = typeof window !== 'undefined' ? window : globalThis;
 
 	let fallbackOffscreen = null;
+	let shaderWorker = null;
+	let shaderWorkerUnavailable = false;
+	let compileRevCounter = 1;
+
+	function getShaderWorker() {
+		if (shaderWorker) return shaderWorker;
+		if (shaderWorkerUnavailable) return null;
+		if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+			shaderWorkerUnavailable = true;
+			return null;
+		}
+		try {
+			const blob = new Blob([SHADER_WORKER_SOURCE], { type: 'application/javascript' });
+			const url = URL.createObjectURL(blob);
+			shaderWorker = new Worker(url);
+			URL.revokeObjectURL(url);
+			shaderWorker.onmessage = (evt) => {
+				const msg = evt.data;
+				if (!msg || msg.type !== 'webgl:compiled') return;
+				const pm = programMeta[msg.programId];
+				if (!pm || pm.compileRev !== msg.rev) return;
+				pm.workerCompiling = false;
+				pm.workerDone = true;
+				pm.workerOk = !!msg.ok;
+				if (!pm.workerOk) {
+					pm.localReady = true;
+					pm.localLinkedOk = false;
+					return;
+				}
+				const c = getGl();
+				if (c) {
+					finalizeLocalProgramLink(c, msg.programId);
+				}
+			};
+			shaderWorker.onerror = () => {
+				shaderWorkerUnavailable = true;
+				shaderWorker = null;
+				for (let i = 1; i < programMeta.length; i++) {
+					const pm = programMeta[i];
+					if (pm && pm.workerCompiling) {
+						pm.workerCompiling = false;
+						pm.workerDone = true;
+						pm.workerOk = true;
+						const c = getGl();
+						if (c) finalizeLocalProgramLink(c, i);
+					}
+				}
+			};
+			return shaderWorker;
+		} catch (_) {
+			shaderWorkerUnavailable = true;
+			shaderWorker = null;
+			return null;
+		}
+	}
 
 	function findCanvas() {
 		const scope = (root && root.querySelector) ? root : (typeof document !== 'undefined' ? document : null);
@@ -70,6 +217,40 @@ export function createWebGlBridge(root, getWasm) {
 
 	let parallelCompileExt = undefined;
 
+	function finalizeLocalProgramLink(c, programId) {
+		const pm = programMeta[programId];
+		if (!pm || !pm.linked) return;
+		let p = programs[programId];
+		if (!p) {
+			p = c.createProgram();
+			programs[programId] = p;
+		}
+		if (!p) return;
+		for (const sid of pm.shaders) {
+			const sm = shaderMeta[sid];
+			if (!sm) continue;
+			let s = shaders[sid];
+			if (!s) {
+				s = c.createShader(sm.type);
+				shaders[sid] = s;
+			}
+			if (s && sm.src) {
+				c.shaderSource(s, sm.src);
+				c.compileShader(s);
+				c.attachShader(p, s);
+			}
+		}
+		for (const [idx, name] of pm.attribBinds) {
+			c.bindAttribLocation(p, idx, name);
+		}
+		c.linkProgram(p);
+		pm.localLinkedInitiated = true;
+		if (!parallelCompileExt) {
+			pm.localReady = true;
+			pm.localLinkedOk = !!c.getProgramParameter(p, c.LINK_STATUS);
+		}
+	}
+
 	function rebuildContextResources(c) {
 		for (let i = 1; i < shaderMeta.length; i++) {
 			const sm = shaderMeta[i];
@@ -77,7 +258,6 @@ export function createWebGlBridge(root, getWasm) {
 			const s = c.createShader(sm.type);
 			if (s && sm.src) {
 				c.shaderSource(s, sm.src);
-				if (sm.compiled) c.compileShader(s);
 			}
 			shaders[i] = s;
 		}
@@ -85,23 +265,19 @@ export function createWebGlBridge(root, getWasm) {
 			const pm = programMeta[i];
 			if (!pm) { programs[i] = null; continue; }
 			const p = c.createProgram();
-			if (p) {
-				for (const sid of pm.shaders) {
-					const s = shaders[sid];
-					if (s) c.attachShader(p, s);
-				}
-				for (const [idx, name] of pm.attribBinds) {
-					c.bindAttribLocation(p, idx, name);
-				}
-				if (pm.linked) c.linkProgram(p);
-			}
 			programs[i] = p;
+			if (p && pm.linked && !pm.workerCompiling) {
+				pm.localLinkedInitiated = false;
+				pm.localReady = false;
+				finalizeLocalProgramLink(c, i);
+			}
 		}
 		for (let i = 1; i < uniformMeta.length; i++) {
 			const um = uniformMeta[i];
 			if (!um) { uniformLocs[i] = null; continue; }
 			const p = programs[um.programId];
-			uniformLocs[i] = p ? c.getUniformLocation(p, um.name) : null;
+			const pm = programMeta[um.programId];
+			uniformLocs[i] = (p && pm && pm.localLinkedInitiated) ? c.getUniformLocation(p, um.name) : null;
 		}
 		for (let i = 1; i < bufferMeta.length; i++) {
 			const bm = bufferMeta[i];
@@ -169,6 +345,10 @@ export function createWebGlBridge(root, getWasm) {
 			gl = null;
 			glCanvas = null;
 			parallelCompileExt = undefined;
+			if (shaderWorker) {
+				try { shaderWorker.terminate(); } catch (_) {}
+				shaderWorker = null;
+			}
 		},
 		makeImports() {
 			return {
@@ -228,7 +408,7 @@ export function createWebGlBridge(root, getWasm) {
 					if (!c) return 0;
 					const s = c.createShader(type);
 					shaders.push(s);
-					shaderMeta.push({ type, src: '', compiled: false });
+					shaderMeta.push({ type, src: '', compiled: false, deleted: false });
 					return shaders.length - 1;
 				},
 				glShaderSource(shaderId, srcPtr, srcLen) {
@@ -244,12 +424,19 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const s = shaders[shaderId];
 					if (shaderMeta[shaderId]) shaderMeta[shaderId].compiled = true;
-					if (c && s) c.compileShader(s);
+					const w = getShaderWorker();
+					if (!w && c && s) {
+						c.compileShader(s);
+					}
 				},
 				glGetShaderParameter(shaderId, pname) {
 					const c = getGl();
+					const sm = shaderMeta[shaderId];
+					if (!c || !sm) return 0;
+					const w = getShaderWorker();
+					if (w) return 1;
 					const s = shaders[shaderId];
-					if (!c || !s) return 0;
+					if (!s) return 0;
 					if (pname === 0x91B1 && !parallelCompileExt) return 1;
 					const res = c.getShaderParameter(s, pname);
 					return res ? 1 : 0;
@@ -259,27 +446,107 @@ export function createWebGlBridge(root, getWasm) {
 					if (!c) return 0;
 					const p = c.createProgram();
 					programs.push(p);
-					programMeta.push({ shaders: [], attribBinds: [], linked: false });
+					programMeta.push({
+						shaders: [],
+						attribBinds: [],
+						linked: false,
+						workerCompiling: false,
+						workerDone: false,
+						workerOk: true,
+						localLinkedInitiated: false,
+						localReady: false,
+						localLinkedOk: true,
+						compileRev: 0
+					});
 					return programs.length - 1;
 				},
 				glAttachShader(programId, shaderId) {
 					const c = getGl();
-					const p = programs[programId];
-					const s = shaders[shaderId];
-					if (programMeta[programId]) programMeta[programId].shaders.push(shaderId);
-					if (c && p && s) c.attachShader(p, s);
+					const pm = programMeta[programId];
+					if (pm) pm.shaders.push(shaderId);
+					const w = getShaderWorker();
+					if (!w) {
+						const p = programs[programId];
+						const s = shaders[shaderId];
+						if (c && p && s) c.attachShader(p, s);
+					}
 				},
 				glLinkProgram(programId) {
 					const c = getGl();
-					const p = programs[programId];
-					if (programMeta[programId]) programMeta[programId].linked = true;
-					if (c && p) c.linkProgram(p);
+					const pm = programMeta[programId];
+					if (!pm) return;
+					pm.linked = true;
+					const w = getShaderWorker();
+					if (w) {
+						let vsSrc = '';
+						let fsSrc = '';
+						for (const sid of pm.shaders) {
+							const sm = shaderMeta[sid];
+							if (!sm) continue;
+							if (sm.type === 0x8B31) vsSrc = sm.src;
+							else if (sm.type === 0x8B30) fsSrc = sm.src;
+						}
+						const rev = compileRevCounter++;
+						pm.compileRev = rev;
+						pm.workerCompiling = true;
+						pm.workerDone = false;
+						pm.localLinkedInitiated = false;
+						pm.localReady = false;
+						w.postMessage({
+							type: 'webgl:compile',
+							programId,
+							rev,
+							vsSrc,
+							fsSrc,
+							attribBinds: pm.attribBinds
+						});
+						return;
+					}
+					if (c) {
+						const p = programs[programId];
+						if (p) {
+							c.linkProgram(p);
+							pm.localLinkedInitiated = true;
+							if (!parallelCompileExt) {
+								pm.localReady = true;
+								pm.localLinkedOk = !!c.getProgramParameter(p, c.LINK_STATUS);
+							}
+						}
+					}
 				},
 				glGetProgramParameter(programId, pname) {
 					const c = getGl();
 					const p = programs[programId];
-					if (!c || !p) return 0;
-					if (pname === 0x91B1 && !parallelCompileExt) return 1;
+					const pm = programMeta[programId];
+					if (!c || !pm) return 0;
+					if (pname === 0x91B1) {
+						if (pm.workerCompiling) return 0;
+						if (!pm.localLinkedInitiated) {
+							if (pm.workerDone && !pm.workerOk) return 1;
+							finalizeLocalProgramLink(c, programId);
+						}
+						if (pm.localReady) return 1;
+						if (!parallelCompileExt) {
+							pm.localReady = true;
+							pm.localLinkedOk = p ? !!c.getProgramParameter(p, c.LINK_STATUS) : false;
+							return 1;
+						}
+						const done = p ? !!c.getProgramParameter(p, 0x91B1) : true;
+						if (done) {
+							pm.localReady = true;
+							pm.localLinkedOk = p ? !!c.getProgramParameter(p, c.LINK_STATUS) : false;
+						}
+						return done ? 1 : 0;
+					}
+					if (pname === 0x8B82) {
+						if (pm.workerDone && !pm.workerOk) return 0;
+						if (!pm.localLinkedInitiated && !pm.workerCompiling) {
+							finalizeLocalProgramLink(c, programId);
+						}
+						if (pm.localReady) return pm.localLinkedOk ? 1 : 0;
+						return (p && c.getProgramParameter(p, pname)) ? 1 : 0;
+					}
+					if (!p) return 0;
 					const res = c.getProgramParameter(p, pname);
 					return res ? 1 : 0;
 				},
@@ -512,14 +779,19 @@ export function createWebGlBridge(root, getWasm) {
 				glDeleteShader(shaderId) {
 					const c = getGl();
 					const s = shaders[shaderId];
-					if (c && s) c.deleteShader(s);
-					shaders[shaderId] = null;
+					if (shaderMeta[shaderId]) shaderMeta[shaderId].deleted = true;
+					const w = getShaderWorker();
+					if (!w) {
+						if (c && s) c.deleteShader(s);
+						shaders[shaderId] = null;
+					}
 				},
 				glDeleteProgram(programId) {
 					const c = getGl();
 					const p = programs[programId];
 					if (c && p) c.deleteProgram(p);
 					programs[programId] = null;
+					if (programMeta[programId]) programMeta[programId] = null;
 				},
 				glDeleteBuffer(bufferId) {
 					const c = getGl();
