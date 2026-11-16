@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.1.1] - 2026-11-16
 
 ### Added
 - **Offscreen Framebuffer (FBO), Renderbuffer & Stencil Imports (`include/ttypt/webgl.h`, `htdocs/webgl-cap.js`, `htdocs/lamina-worker.js`)**:
@@ -9,6 +9,8 @@
 - **Node Addon & Substrate Alignment (`npm/native/LIBS`, `npm/package.json`)**:
   - Linked the Node-API native addon exclusively against camera math (`src/lam_cam.c`) without requiring host desktop GLFW/GLEW libraries.
   - Upgraded `@tty-pt/stele` `peerDependencies` (`>=1.7.0`) and `devDependencies` (`^1.7.0`).
+- **Arch Linux (`pacman`) Packaging (`.github/workflows/ci.yml`)**:
+  - Added `pacman` to `publish_to` and configured `deps_pacman: "libstele,libcorm,glfw,libpng,glew"` so `liblamina` publishes across all 7 OS targets (`deb`, `apk`, `rpm`, `pacman`, `brew`, `openbsd`, `winget`).
 
 ## [1.1.0] - 2026-11-13
 
