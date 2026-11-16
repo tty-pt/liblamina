@@ -40,6 +40,8 @@ webgl.glDisableVertexAttribArray
 webgl.glVertexAttribPointer
 webgl.glDrawArrays
 webgl.glDrawElements
+webgl.glDrawArraysInstanced
+webgl.glVertexAttribDivisor
 webgl.glGetAttribLocation
 webgl.glBindAttribLocation
 webgl.glGetUniformLocation

@@ -743,6 +743,17 @@ export function createWebGlBridge(root, getWasm) {
 						if (glCanvas) glCanvas.__stele_dirty = true;
 					}
 				},
+				glDrawArraysInstanced(mode, first, count, instanceCount) {
+					const c = getGl();
+					if (c) {
+						c.drawArraysInstanced(mode, first, count, instanceCount);
+						if (glCanvas) glCanvas.__stele_dirty = true;
+					}
+				},
+				glVertexAttribDivisor(index, divisor) {
+					const c = getGl();
+					if (c) c.vertexAttribDivisor(index, divisor);
+				},
 				glGetAttribLocation(programId, namePtr, nameLen) {
 					const c = getGl();
 					const exports = getWasm();

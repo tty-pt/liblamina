@@ -211,6 +211,12 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count);
 __attribute__((import_module("webgl"), import_name("glDrawElements")))
 void glDrawElements(GLenum mode, GLsizei count, GLenum type, size_t offset);
 
+__attribute__((import_module("webgl"), import_name("glDrawArraysInstanced")))
+void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
+
+__attribute__((import_module("webgl"), import_name("glVertexAttribDivisor")))
+void glVertexAttribDivisor(GLuint index, GLuint divisor);
+
 __attribute__((import_module("webgl"), import_name("glGetAttribLocation")))
 GLint glGetAttribLocation(GLuint program, const char *name, size_t len);
 
@@ -335,6 +341,8 @@ static inline void glDisableVertexAttribArray(GLuint i) { (void)i; }
 static inline void glVertexAttribPointer(GLuint i, GLint s, GLenum t, GLboolean n, GLsizei st, size_t o) { (void)i; (void)s; (void)t; (void)n; (void)st; (void)o; }
 static inline void glDrawArrays(GLenum m, GLint f, GLsizei c) { (void)m; (void)f; (void)c; }
 static inline void glDrawElements(GLenum m, GLsizei c, GLenum t, size_t o) { (void)m; (void)c; (void)t; (void)o; }
+static inline void glDrawArraysInstanced(GLenum m, GLint f, GLsizei c, GLsizei ic) { (void)m; (void)f; (void)c; (void)ic; }
+static inline void glVertexAttribDivisor(GLuint i, GLuint d) { (void)i; (void)d; }
 static inline GLint glGetAttribLocation(GLuint p, const char *n, size_t l) { (void)p; (void)n; (void)l; return 0; }
 static inline void glBindAttribLocation(GLuint p, GLuint i, const char *n, size_t l) { (void)p; (void)i; (void)n; (void)l; }
 static inline GLint glGetUniformLocation(GLuint p, const char *n, size_t l) { (void)p; (void)n; (void)l; return 1; }
