@@ -1,3 +1,26 @@
+## [1.1.1] - 2026-11-16
+
+### Added
+- **Offscreen Framebuffer (FBO), Renderbuffer & Stencil Imports (`include/ttypt/webgl.h`, `htdocs/webgl-cap.js`, `htdocs/lamina-worker.js`)**:
+  - Added offscreen framebuffer (`webgl_create_framebuffer`, `webgl_bind_framebuffer`, `webgl_framebuffer_texture2d`), renderbuffer (`webgl_create_renderbuffer`, `webgl_bind_renderbuffer`, `webgl_renderbuffer_storage`, `webgl_framebuffer_renderbuffer`), and viewport/scissor/stencil bindings (`webgl_stencil_func`, `webgl_stencil_op`, `webgl_stencil_mask`, `webgl_color_mask`) for low-resolution volumetric cloud FBO rendering and multi-pass compositing.
+  - Enabled single-sampled main buffer configuration for crisp pixel/retro pass-through when requested.
+
+### Changed
+- **Node Addon & Substrate Alignment (`npm/native/LIBS`, `npm/package.json`)**:
+  - Linked the Node-API native addon exclusively against camera math (`src/lam_cam.c`) without requiring host desktop GLFW/GLEW libraries.
+  - Upgraded `@tty-pt/stele` `peerDependencies` (`>=1.7.0`) and `devDependencies` (`^1.7.0`).
+- **Arch Linux (`pacman`) Packaging (`.github/workflows/ci.yml`)**:
+  - Added `pacman` to `publish_to` and configured `deps_pacman: "libstele,libcorm,glfw,libpng,glew"` so `liblamina` publishes across all 7 OS targets (`deb`, `apk`, `rpm`, `pacman`, `brew`, `openbsd`, `winget`).
+
+## [1.1.0] - 2026-11-13
+
+- **WebGL Worker Offloading & Parallel Shader Compilation**:
+  - Unified native C 2D/3D engine with pure-C WebGL2 pass-through bridge, camera math, and standardized README.
+  - Added KHR_parallel_shader_compile support and offscreen canvas worker dispatch.
+  - Perspective camera projection, billboard alignment, and multi-scale water optics.
+- **Libstele v1.6.0 Substrate Alignment**:
+  - Upgraded substrate baseline to @tty-pt/stele@^1.6.0 (>=1.6.0).
+
 ## [1.0.1]
 
 - **Universal Substrate Migration (`libstele`)**:

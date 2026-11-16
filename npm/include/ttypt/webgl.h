@@ -59,6 +59,8 @@ typedef unsigned char GLboolean;
 #define GL_CULL_FACE              0x0B44
 #define GL_LESS                   0x0201
 #define GL_LEQUAL                 0x0203
+#define GL_ZERO                   0
+#define GL_ONE                    1
 #define GL_SRC_ALPHA              0x0302
 #define GL_ONE_MINUS_SRC_ALPHA    0x0303
 #define GL_TEXTURE_2D             0x0DE1
