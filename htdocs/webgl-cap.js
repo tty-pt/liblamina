@@ -471,7 +471,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const s = shaders[shaderId];
 					if (shaderMeta[shaderId]) shaderMeta[shaderId].compiled = true;
-					const w = getShaderWorker();
+					const w = (!parallelCompileExt) ? getShaderWorker() : null;
 					if (!w && c && s) {
 						c.compileShader(s);
 					}
@@ -480,7 +480,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const sm = shaderMeta[shaderId];
 					if (!c || !sm) return 0;
-					const w = getShaderWorker();
+					const w = (!parallelCompileExt) ? getShaderWorker() : null;
 					if (w) return 1;
 					const s = shaders[shaderId];
 					if (!s) return 0;
@@ -511,7 +511,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const pm = programMeta[programId];
 					if (pm) pm.shaders.push(shaderId);
-					const w = getShaderWorker();
+					const w = (!parallelCompileExt) ? getShaderWorker() : null;
 					if (!w) {
 						const p = programs[programId];
 						const s = shaders[shaderId];
@@ -523,7 +523,7 @@ export function createWebGlBridge(root, getWasm) {
 					const pm = programMeta[programId];
 					if (!pm) return;
 					pm.linked = true;
-					const w = getShaderWorker();
+					const w = (!parallelCompileExt) ? getShaderWorker() : null;
 					if (w) {
 						let vsSrc = '';
 						let fsSrc = '';
@@ -557,6 +557,8 @@ export function createWebGlBridge(root, getWasm) {
 							if (!parallelCompileExt) {
 								pm.localReady = true;
 								pm.localLinkedOk = !!c.getProgramParameter(p, c.LINK_STATUS);
+							} else {
+								pm.localReady = false;
 							}
 						}
 					}
@@ -568,6 +570,13 @@ export function createWebGlBridge(root, getWasm) {
 					if (!c || !pm) return 0;
 					if (pname === 0x91B1) {
 						if (pm.workerCompiling) return 0;
+						if (parallelCompileExt && p) {
+							const done = !!c.getProgramParameter(p, parallelCompileExt.COMPLETION_STATUS_KHR);
+							if (!done) return 0;
+							pm.localReady = true;
+							pm.localLinkedOk = !!c.getProgramParameter(p, c.LINK_STATUS);
+							return 1;
+						}
 						if (!pm.localLinkedInitiated) {
 							if (pm.workerDone && !pm.workerOk) return 1;
 							finalizeLocalProgramLink(c, programId);
@@ -717,6 +726,36 @@ export function createWebGlBridge(root, getWasm) {
 						c.texImage2D(target, level, internalformat, width, height, border, format, type, view);
 					}
 				},
+				glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, pixels) {
+					const c = getGl();
+					const exports = getWasm();
+					if (!c || typeof c.texImage3D !== 'function') return;
+					const ptr = pixels >>> 0;
+					if (ptr === 0 || !exports || !exports.memory) {
+						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, null);
+						return;
+					}
+					if (type === 0x1402) {
+						const view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
+						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, view);
+					} else {
+						const view = new Uint8Array(exports.memory.buffer, ptr, width * height * depth * 4);
+						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, view);
+					}
+				},
+				glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels) {
+					const c = getGl();
+					const exports = getWasm();
+					if (!c || typeof c.texSubImage3D !== 'function' || !exports || !exports.memory || !pixels) return;
+					const ptr = pixels >>> 0;
+					if (type === 0x1402) {
+						const view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
+						c.texSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
+					} else {
+						const view = new Uint8Array(exports.memory.buffer, ptr, width * height * depth * 4);
+						c.texSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
+					}
+				},
 				glEnableVertexAttribArray(index) {
 					const c = getGl();
 					if (c) c.enableVertexAttribArray(index);
@@ -740,6 +779,13 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					if (c) {
 						c.drawElements(mode, count, type, offset >>> 0);
+						if (glCanvas) glCanvas.__stele_dirty = true;
+					}
+				},
+				glDrawElementsInstanced(mode, count, type, offset, instanceCount) {
+					const c = getGl();
+					if (c && typeof c.drawElementsInstanced === 'function') {
+						c.drawElementsInstanced(mode, count, type, offset >>> 0, instanceCount);
 						if (glCanvas) glCanvas.__stele_dirty = true;
 					}
 				},

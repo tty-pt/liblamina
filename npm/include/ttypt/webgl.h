@@ -20,6 +20,7 @@ typedef int GLsizei;
 typedef float GLfloat;
 typedef float GLclampf;
 typedef unsigned char GLboolean;
+typedef unsigned int GLbitfield;
 
 #define GL_FALSE                  0
 #define GL_TRUE                   1
@@ -53,6 +54,7 @@ typedef unsigned char GLboolean;
 
 #define GL_COMPILE_STATUS         0x8B81
 #define GL_LINK_STATUS            0x8B82
+#define GL_COMPLETION_STATUS_KHR  0x91B1
 
 #define GL_DEPTH_TEST             0x0B71
 #define GL_BLEND                  0x0BE2
@@ -64,6 +66,7 @@ typedef unsigned char GLboolean;
 #define GL_SRC_ALPHA              0x0302
 #define GL_ONE_MINUS_SRC_ALPHA    0x0303
 #define GL_TEXTURE_2D             0x0DE1
+#define GL_TEXTURE_2D_ARRAY       0x8C1A
 #define GL_TEXTURE0               0x84C0
 #define GL_TEXTURE1               0x84C1
 #define GL_TEXTURE2               0x84C2
@@ -78,6 +81,30 @@ typedef unsigned char GLboolean;
 #define GL_R16I                   0x8233
 #define GL_RED_INTEGER            0x8D94
 #define GL_UNPACK_ALIGNMENT       0x0CF5
+/* Offscreen render targets (WebGL2): framebuffers, renderbuffers, resolve blits */
+#define GL_FRAMEBUFFER            0x8D40
+#define GL_READ_FRAMEBUFFER       0x8CA8
+#define GL_DRAW_FRAMEBUFFER       0x8CA9
+#define GL_RENDERBUFFER           0x8D41
+#define GL_COLOR_ATTACHMENT0      0x8CE0
+#define GL_DEPTH_ATTACHMENT       0x8D00
+#define GL_FRAMEBUFFER_COMPLETE   0x8CD5
+#define GL_RGBA8                  0x8058
+#define GL_R8                     0x8229
+#define GL_RED                    0x1903
+#define GL_DEPTH_COMPONENT        0x1902
+#define GL_DEPTH_COMPONENT32F     0x8CAC
+#define GL_DEPTH_STENCIL          0x84F9
+#define GL_DEPTH32F_STENCIL8      0x8CAD
+#define GL_FLOAT_32_UNSIGNED_INT_24_8_REV 0x8DAD
+#define GL_DEPTH_STENCIL_ATTACHMENT 0x821A
+#define GL_STENCIL_TEST           0x0B90
+#define GL_STENCIL_BUFFER_BIT     0x00000400
+#define GL_ALWAYS                 0x0207
+#define GL_EQUAL                  0x0202
+#define GL_KEEP                   0x1E00
+#define GL_REPLACE                0x1E01
+
 #define GL_POLYGON_OFFSET_FILL    0x8037
 
 #ifdef __wasm__
@@ -170,6 +197,17 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat,
                   GLsizei width, GLsizei height, GLint border,
                   GLenum format, GLenum type, const void *pixels);
 
+__attribute__((import_module("webgl"), import_name("glTexImage3D")))
+void glTexImage3D(GLenum target, GLint level, GLint internalformat,
+                  GLsizei width, GLsizei height, GLsizei depth,
+                  GLint border, GLenum format, GLenum type, const void *pixels);
+
+__attribute__((import_module("webgl"), import_name("glTexSubImage3D")))
+void glTexSubImage3D(GLenum target, GLint level,
+                     GLint xoffset, GLint yoffset, GLint zoffset,
+                     GLsizei width, GLsizei height, GLsizei depth,
+                     GLenum format, GLenum type, const void *pixels);
+
 __attribute__((import_module("webgl"), import_name("glEnableVertexAttribArray")))
 void glEnableVertexAttribArray(GLuint index);
 
@@ -184,6 +222,9 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count);
 
 __attribute__((import_module("webgl"), import_name("glDrawElements")))
 void glDrawElements(GLenum mode, GLsizei count, GLenum type, size_t offset);
+
+__attribute__((import_module("webgl"), import_name("glDrawElementsInstanced")))
+void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, size_t offset, GLsizei instancecount);
 
 __attribute__((import_module("webgl"), import_name("glDrawArraysInstanced")))
 void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
@@ -233,6 +274,51 @@ void glDeleteProgram(GLuint program);
 __attribute__((import_module("webgl"), import_name("glDeleteBuffer")))
 void glDeleteBuffer(GLuint buffer);
 
+__attribute__((import_module("webgl"), import_name("glCreateFramebuffer")))
+GLuint glCreateFramebuffer(void);
+
+__attribute__((import_module("webgl"), import_name("glDeleteFramebuffer")))
+void glDeleteFramebuffer(GLuint fb);
+
+__attribute__((import_module("webgl"), import_name("glBindFramebuffer")))
+void glBindFramebuffer(GLenum target, GLuint fb);
+
+__attribute__((import_module("webgl"), import_name("glFramebufferTexture2D")))
+void glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint tex, GLint level);
+
+__attribute__((import_module("webgl"), import_name("glFramebufferRenderbuffer")))
+void glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum rbtarget, GLuint rb);
+
+__attribute__((import_module("webgl"), import_name("glCheckFramebufferStatus")))
+GLenum glCheckFramebufferStatus(GLenum target);
+
+__attribute__((import_module("webgl"), import_name("glCreateRenderbuffer")))
+GLuint glCreateRenderbuffer(void);
+
+__attribute__((import_module("webgl"), import_name("glDeleteRenderbuffer")))
+void glDeleteRenderbuffer(GLuint rb);
+
+__attribute__((import_module("webgl"), import_name("glBindRenderbuffer")))
+void glBindRenderbuffer(GLenum target, GLuint rb);
+
+__attribute__((import_module("webgl"), import_name("glRenderbufferStorageMultisample")))
+void glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
+
+__attribute__((import_module("webgl"), import_name("glStencilFunc")))
+void glStencilFunc(GLenum func, GLint ref, GLuint mask);
+
+__attribute__((import_module("webgl"), import_name("glStencilOp")))
+void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass);
+
+__attribute__((import_module("webgl"), import_name("glStencilMask")))
+void glStencilMask(GLuint mask);
+
+__attribute__((import_module("webgl"), import_name("glClearStencil")))
+void glClearStencil(GLint s);
+
+__attribute__((import_module("webgl"), import_name("glBlitFramebuffer")))
+void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter);
+
 #else
 
 static inline void glViewport(GLint x, GLint y, GLsizei width, GLsizei height) { (void)x; (void)y; (void)width; (void)height; }
@@ -265,11 +351,16 @@ static inline void glTexParameteri(GLenum t, GLenum p, GLint v) { (void)t; (void
 static inline void glPixelStorei(GLenum p, GLint v) { (void)p; (void)v; }
 static inline void glTexImage2D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLint b, GLenum f, GLenum ty, const void *px)
 { (void)t; (void)l; (void)inf; (void)w; (void)h; (void)b; (void)f; (void)ty; (void)px; }
+static inline void glTexImage3D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLsizei d, GLint b, GLenum f, GLenum ty, const void *px)
+{ (void)t; (void)l; (void)inf; (void)w; (void)h; (void)d; (void)b; (void)f; (void)ty; (void)px; }
+static inline void glTexSubImage3D(GLenum t, GLint l, GLint xo, GLint yo, GLint zo, GLsizei w, GLsizei h, GLsizei d, GLenum f, GLenum ty, const void *px)
+{ (void)t; (void)l; (void)xo; (void)yo; (void)zo; (void)w; (void)h; (void)d; (void)f; (void)ty; (void)px; }
 static inline void glEnableVertexAttribArray(GLuint i) { (void)i; }
 static inline void glDisableVertexAttribArray(GLuint i) { (void)i; }
 static inline void glVertexAttribPointer(GLuint i, GLint s, GLenum t, GLboolean n, GLsizei st, size_t o) { (void)i; (void)s; (void)t; (void)n; (void)st; (void)o; }
 static inline void glDrawArrays(GLenum m, GLint f, GLsizei c) { (void)m; (void)f; (void)c; }
 static inline void glDrawElements(GLenum m, GLsizei c, GLenum t, size_t o) { (void)m; (void)c; (void)t; (void)o; }
+static inline void glDrawElementsInstanced(GLenum m, GLsizei c, GLenum t, size_t o, GLsizei ic) { (void)m; (void)c; (void)t; (void)o; (void)ic; }
 static inline void glDrawArraysInstanced(GLenum m, GLint f, GLsizei c, GLsizei ic) { (void)m; (void)f; (void)c; (void)ic; }
 static inline void glVertexAttribDivisor(GLuint i, GLuint d) { (void)i; (void)d; }
 static inline GLint glGetAttribLocation(GLuint p, const char *n, size_t l) { (void)p; (void)n; (void)l; return 0; }
@@ -286,6 +377,21 @@ static inline void glUniformMatrix4fv(GLint l, GLsizei c, GLboolean t, const GLf
 static inline void glDeleteShader(GLuint s) { (void)s; }
 static inline void glDeleteProgram(GLuint p) { (void)p; }
 static inline void glDeleteBuffer(GLuint b) { (void)b; }
+static inline GLuint glCreateFramebuffer(void) { return 1; }
+static inline void glDeleteFramebuffer(GLuint fb) { (void)fb; }
+static inline void glBindFramebuffer(GLenum target, GLuint fb) { (void)target; (void)fb; }
+static inline void glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint tex, GLint level) { (void)target; (void)attachment; (void)textarget; (void)tex; (void)level; }
+static inline void glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum rbtarget, GLuint rb) { (void)target; (void)attachment; (void)rbtarget; (void)rb; }
+static inline GLenum glCheckFramebufferStatus(GLenum target) { (void)target; return GL_FRAMEBUFFER_COMPLETE; }
+static inline GLuint glCreateRenderbuffer(void) { return 1; }
+static inline void glDeleteRenderbuffer(GLuint rb) { (void)rb; }
+static inline void glBindRenderbuffer(GLenum target, GLuint rb) { (void)target; (void)rb; }
+static inline void glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) { (void)target; (void)samples; (void)internalformat; (void)width; (void)height; }
+static inline void glStencilFunc(GLenum func, GLint ref, GLuint mask) { (void)func; (void)ref; (void)mask; }
+static inline void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass) { (void)sfail; (void)dpfail; (void)dppass; }
+static inline void glStencilMask(GLuint mask) { (void)mask; }
+static inline void glClearStencil(GLint s) { (void)s; }
+static inline void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)dx0; (void)dy0; (void)dx1; (void)dy1; (void)mask; (void)filter; }
 
 #endif
 
