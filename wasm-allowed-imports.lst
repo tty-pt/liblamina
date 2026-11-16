@@ -35,11 +35,14 @@ webgl.glActiveTexture
 webgl.glTexParameteri
 webgl.glPixelStorei
 webgl.glTexImage2D
+webgl.glTexImage3D
+webgl.glTexSubImage3D
 webgl.glEnableVertexAttribArray
 webgl.glDisableVertexAttribArray
 webgl.glVertexAttribPointer
 webgl.glDrawArrays
 webgl.glDrawElements
+webgl.glDrawElementsInstanced
 webgl.glDrawArraysInstanced
 webgl.glVertexAttribDivisor
 webgl.glGetAttribLocation

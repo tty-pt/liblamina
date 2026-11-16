@@ -66,6 +66,7 @@ typedef unsigned int GLbitfield;
 #define GL_SRC_ALPHA              0x0302
 #define GL_ONE_MINUS_SRC_ALPHA    0x0303
 #define GL_TEXTURE_2D             0x0DE1
+#define GL_TEXTURE_2D_ARRAY       0x8C1A
 #define GL_TEXTURE0               0x84C0
 #define GL_TEXTURE1               0x84C1
 #define GL_TEXTURE2               0x84C2
@@ -196,6 +197,17 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat,
                   GLsizei width, GLsizei height, GLint border,
                   GLenum format, GLenum type, const void *pixels);
 
+__attribute__((import_module("webgl"), import_name("glTexImage3D")))
+void glTexImage3D(GLenum target, GLint level, GLint internalformat,
+                  GLsizei width, GLsizei height, GLsizei depth,
+                  GLint border, GLenum format, GLenum type, const void *pixels);
+
+__attribute__((import_module("webgl"), import_name("glTexSubImage3D")))
+void glTexSubImage3D(GLenum target, GLint level,
+                     GLint xoffset, GLint yoffset, GLint zoffset,
+                     GLsizei width, GLsizei height, GLsizei depth,
+                     GLenum format, GLenum type, const void *pixels);
+
 __attribute__((import_module("webgl"), import_name("glEnableVertexAttribArray")))
 void glEnableVertexAttribArray(GLuint index);
 
@@ -210,6 +222,9 @@ void glDrawArrays(GLenum mode, GLint first, GLsizei count);
 
 __attribute__((import_module("webgl"), import_name("glDrawElements")))
 void glDrawElements(GLenum mode, GLsizei count, GLenum type, size_t offset);
+
+__attribute__((import_module("webgl"), import_name("glDrawElementsInstanced")))
+void glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, size_t offset, GLsizei instancecount);
 
 __attribute__((import_module("webgl"), import_name("glDrawArraysInstanced")))
 void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
@@ -336,11 +351,16 @@ static inline void glTexParameteri(GLenum t, GLenum p, GLint v) { (void)t; (void
 static inline void glPixelStorei(GLenum p, GLint v) { (void)p; (void)v; }
 static inline void glTexImage2D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLint b, GLenum f, GLenum ty, const void *px)
 { (void)t; (void)l; (void)inf; (void)w; (void)h; (void)b; (void)f; (void)ty; (void)px; }
+static inline void glTexImage3D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLsizei d, GLint b, GLenum f, GLenum ty, const void *px)
+{ (void)t; (void)l; (void)inf; (void)w; (void)h; (void)d; (void)b; (void)f; (void)ty; (void)px; }
+static inline void glTexSubImage3D(GLenum t, GLint l, GLint xo, GLint yo, GLint zo, GLsizei w, GLsizei h, GLsizei d, GLenum f, GLenum ty, const void *px)
+{ (void)t; (void)l; (void)xo; (void)yo; (void)zo; (void)w; (void)h; (void)d; (void)f; (void)ty; (void)px; }
 static inline void glEnableVertexAttribArray(GLuint i) { (void)i; }
 static inline void glDisableVertexAttribArray(GLuint i) { (void)i; }
 static inline void glVertexAttribPointer(GLuint i, GLint s, GLenum t, GLboolean n, GLsizei st, size_t o) { (void)i; (void)s; (void)t; (void)n; (void)st; (void)o; }
 static inline void glDrawArrays(GLenum m, GLint f, GLsizei c) { (void)m; (void)f; (void)c; }
 static inline void glDrawElements(GLenum m, GLsizei c, GLenum t, size_t o) { (void)m; (void)c; (void)t; (void)o; }
+static inline void glDrawElementsInstanced(GLenum m, GLsizei c, GLenum t, size_t o, GLsizei ic) { (void)m; (void)c; (void)t; (void)o; (void)ic; }
 static inline void glDrawArraysInstanced(GLenum m, GLint f, GLsizei c, GLsizei ic) { (void)m; (void)f; (void)c; (void)ic; }
 static inline void glVertexAttribDivisor(GLuint i, GLuint d) { (void)i; (void)d; }
 static inline GLint glGetAttribLocation(GLuint p, const char *n, size_t l) { (void)p; (void)n; (void)l; return 0; }
