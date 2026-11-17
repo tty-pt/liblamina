@@ -736,7 +736,12 @@ export function createWebGlBridge(root, getWasm) {
 						return;
 					}
 					if (type === 0x1402) {
-						const view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
+						let view;
+						if ((ptr & 1) === 0) {
+							view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
+						} else {
+							view = new Int16Array(exports.memory.buffer.slice(ptr, ptr + width * height * depth * 2));
+						}
 						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, view);
 					} else {
 						const view = new Uint8Array(exports.memory.buffer, ptr, width * height * depth * 4);
@@ -749,7 +754,12 @@ export function createWebGlBridge(root, getWasm) {
 					if (!c || typeof c.texSubImage3D !== 'function' || !exports || !exports.memory || !pixels) return;
 					const ptr = pixels >>> 0;
 					if (type === 0x1402) {
-						const view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
+						let view;
+						if ((ptr & 1) === 0) {
+							view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
+						} else {
+							view = new Int16Array(exports.memory.buffer.slice(ptr, ptr + width * height * depth * 2));
+						}
 						c.texSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
 					} else {
 						const view = new Uint8Array(exports.memory.buffer, ptr, width * height * depth * 4);
