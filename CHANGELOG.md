@@ -1,3 +1,15 @@
+## [Unreleased] (target: v1.2.0)
+
+### Added
+- **GPU Hardware Instancing & 3D / 2D-Array Texture Bindings (`include/ttypt/webgl.h`, `npm/include/ttypt/webgl.h`, `htdocs/lamina-bridge.js`, `htdocs/webgl-cap.js`, `htdocs/lamina-worker.js`, `wasm-allowed-imports.lst`)**:
+  - Added `webgl_draw_arrays_instanced`, `webgl_draw_elements_instanced`, and `webgl_vertex_attrib_divisor` host imports and WebGL2 bridge dispatchers for single-draw-call instanced billboard and terrain batching.
+  - Added 3D texture / 2D texture array upload bindings (`webgl_tex_image_3d`, `webgl_tex_sub_image_3d`, `GL_TEXTURE_2D_ARRAY`) and asynchronous shader status polling (`webgl_get_shader_completion_status`, `GL_COMPLETION_STATUS_KHR`).
+
+### Fixed
+- **3D Texture Unpack Alignment & Offscreen FBO Viewport Guard (`htdocs/lamina-bridge.js`, `htdocs/webgl-cap.js`, `htdocs/lamina-worker.js`)**:
+  - Guarded `pixelStorei(UNPACK_ALIGNMENT, 1)` on `texImage3D` and `texSubImage3D` when row byte stride `(width * 4) % 4 !== 0`.
+  - Guarded `webgl_viewport` so binding an offscreen framebuffer (e.g. half-resolution volumetric cloud FBO or CSM shadow atlas) never resizes the main canvas swapchain dimensions.
+
 ## [1.1.1] - 2026-11-16
 
 ### Added

@@ -115,8 +115,8 @@ The API contract lives across seven modular headers in `<ttypt/>`:
 - **Key Code Translation**: `lam_key_val(code)` and `lam_key_parse(target, len, code, flags)` map hardware keycodes to ASCII/UTF-8 characters.
 - **Gamepads & Hats**: Constants for directional pads and buttons (`LAM_HAT_*`, `LAM_GAMEPAD_*`).
 
-### 7. WebGL2 Hardware Bridge (`<ttypt/webgl.h>` & `htdocs/lamina-bridge.js`)
-- Low-level WebAssembly-to-WebGL2 binding definitions and the self-contained browser runtime (`createLaminaBridge`) supporting continuous 3D terrain meshes, multi-scale procedural water optics, and hardware-instanced billboards.
+### 7. WebGL2 Hardware Bridge (`<ttypt/webgl.h>`, `htdocs/lamina-bridge.js`, `htdocs/webgl-cap.js`)
+- Low-level WebAssembly-to-WebGL2 binding definitions and the self-contained browser runtime (`createLaminaBridge`) supporting continuous 3D terrain meshes, multi-scale procedural water optics, hardware-instanced billboards and terrain (`webgl_draw_arrays_instanced`, `webgl_draw_elements_instanced`, `webgl_vertex_attrib_divisor`), 2D texture arrays (`webgl_tex_image_3d`, `webgl_tex_sub_image_3d`), offscreen FBO passes with canvas swapchain viewport isolation, and asynchronous shader compilation (`KHR_parallel_shader_compile`).
 
 ---
 

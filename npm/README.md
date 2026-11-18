@@ -28,7 +28,7 @@
 3. **CSS-Style Flexbox Layout Engine (`FlexNode`)**:
    - Computes hierarchical row/column flexbox bounds (`setSize`, `setPadding`, `setFlex`, `computeLayout`, `getBounds`) without requiring a browser DOM.
 4. **WebAssembly-to-WebGL2 Capability Bridge (`createLaminaBridge`)**:
-   - Wires the `webgl_*` host imports, offscreen framebuffers, stencil/depth states, parallel shader compilation (`KHR_parallel_shader_compile`), continuous 3D terrain mesh streaming, and instanced billboard batches into `@tty-pt/stele` WASM modules.
+   - Wires `webgl_*` host imports, offscreen framebuffers (with swapchain viewport isolation), stencil/depth states, 2D texture arrays (`webgl_tex_image_3d`, `webgl_tex_sub_image_3d`), GPU hardware instancing (`webgl_draw_arrays_instanced`, `webgl_draw_elements_instanced`, `webgl_vertex_attrib_divisor`), parallel shader compilation (`KHR_parallel_shader_compile`), and continuous 3D terrain/billboard streaming into `@tty-pt/stele` WASM modules.
 
 ---
 
