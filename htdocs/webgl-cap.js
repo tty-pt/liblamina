@@ -387,7 +387,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					if (!c) return;
 					const isFit = glCanvas && (glCanvas.__stele_fit || (glCanvas.hasAttribute && glCanvas.hasAttribute('data-bud-canvas-fit')));
-					if (isFit && w > 0 && h > 0) {
+					if (!currentBoundFramebufferId && isFit && w > 0 && h > 0) {
 						if (glCanvas.width !== w || glCanvas.height !== h) {
 							glCanvas.width = w;
 							glCanvas.height = h;
