@@ -197,6 +197,12 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat,
                   GLsizei width, GLsizei height, GLint border,
                   GLenum format, GLenum type, const void *pixels);
 
+__attribute__((import_module("webgl"), import_name("glTexSubImage2D")))
+void glTexSubImage2D(GLenum target, GLint level,
+                     GLint xoffset, GLint yoffset,
+                     GLsizei width, GLsizei height,
+                     GLenum format, GLenum type, const void *pixels);
+
 __attribute__((import_module("webgl"), import_name("glTexImage3D")))
 void glTexImage3D(GLenum target, GLint level, GLint internalformat,
                   GLsizei width, GLsizei height, GLsizei depth,
@@ -351,6 +357,8 @@ static inline void glTexParameteri(GLenum t, GLenum p, GLint v) { (void)t; (void
 static inline void glPixelStorei(GLenum p, GLint v) { (void)p; (void)v; }
 static inline void glTexImage2D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLint b, GLenum f, GLenum ty, const void *px)
 { (void)t; (void)l; (void)inf; (void)w; (void)h; (void)b; (void)f; (void)ty; (void)px; }
+static inline void glTexSubImage2D(GLenum t, GLint l, GLint xo, GLint yo, GLsizei w, GLsizei h, GLenum f, GLenum ty, const void *px)
+{ (void)t; (void)l; (void)xo; (void)yo; (void)w; (void)h; (void)f; (void)ty; (void)px; }
 static inline void glTexImage3D(GLenum t, GLint l, GLint inf, GLsizei w, GLsizei h, GLsizei d, GLint b, GLenum f, GLenum ty, const void *px)
 { (void)t; (void)l; (void)inf; (void)w; (void)h; (void)d; (void)b; (void)f; (void)ty; (void)px; }
 static inline void glTexSubImage3D(GLenum t, GLint l, GLint xo, GLint yo, GLint zo, GLsizei w, GLsizei h, GLsizei d, GLenum f, GLenum ty, const void *px)

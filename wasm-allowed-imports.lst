@@ -35,6 +35,7 @@ webgl.glActiveTexture
 webgl.glTexParameteri
 webgl.glPixelStorei
 webgl.glTexImage2D
+webgl.glTexSubImage2D
 webgl.glTexImage3D
 webgl.glTexSubImage3D
 webgl.glEnableVertexAttribArray
