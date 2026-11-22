@@ -131,10 +131,17 @@ export function createLaminaBridge(root, getWasm) {
 		return !!(c.hasAttribute && c.hasAttribute('data-bud-canvas-fit'));
 	}
 
+	function isWebGlCanvas(c) {
+		if (!c) return false;
+		if (c.__stele_webgl) return true;
+		return !!(c.hasAttribute && (c.hasAttribute('data-bud-webgl') || c.hasAttribute('data-canvas-webgl')));
+	}
+
 	function pickCanvas(width, height) {
 		const list = allCanvases();
 		let first = null, fit = null, fixed = null;
 		for (const c of list) {
+			if (isWebGlCanvas(c)) continue;
 			if (!first) first = c;
 			const isFit = isFitCanvas(c);
 			if (!isFit && c.width === width && c.height === height) return c;
@@ -187,6 +194,7 @@ export function createLaminaBridge(root, getWasm) {
 	return {
 		mount() {
 			for (const c of allCanvases()) {
+				if (isWebGlCanvas(c)) continue;
 				if (!kicked.has(c)) {
 					kicked.add(c);
 					kickRender();
@@ -247,6 +255,8 @@ export function createLaminaBridge(root, getWasm) {
 							gl.vertexAttribPointer(pipe.aUv, 2, gl.FLOAT, false, 16, 8);
 						}
 
+						if (typeof gl.activeTexture === 'function') gl.activeTexture(gl.TEXTURE0);
+						if (pipe.uTex) gl.uniform1i(pipe.uTex, 0);
 						gl.bindTexture(gl.TEXTURE_2D, t.glPipe.tex);
 						gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
 						gl.drawArrays(gl.TRIANGLES, 0, 6);

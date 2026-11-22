@@ -218,14 +218,14 @@ export function createWebGlBridge(root, getWasm) {
 		const scope = (root && root.querySelector) ? root : (typeof document !== 'undefined' ? document : null);
 		if (scope) {
 			let c = scope.querySelector('[data-bud-webgl]') ||
+				scope.querySelector('[data-canvas-webgl]') ||
 				scope.querySelector('[data-bud-canvas-fit]') ||
-				scope.querySelector('[data-bud-canvas]') ||
-				scope.querySelector('canvas');
+				scope.querySelector('[data-canvas-fit]');
 			if (!c && typeof document !== 'undefined' && scope !== document) {
 				c = document.querySelector('[data-bud-webgl]') ||
+					document.querySelector('[data-canvas-webgl]') ||
 					document.querySelector('[data-bud-canvas-fit]') ||
-					document.querySelector('[data-bud-canvas]') ||
-					document.querySelector('canvas');
+					document.querySelector('[data-canvas-fit]');
 			}
 			return c;
 		}
@@ -332,6 +332,8 @@ export function createWebGlBridge(root, getWasm) {
 			}
 			buffers[i] = b;
 		}
+		const nullFboTexIds = new Set();
+		if (typeof c.activeTexture === 'function') c.activeTexture(0x84C0);
 		for (let i = 1; i < textureMeta.length; i++) {
 			const tm = textureMeta[i];
 			if (!tm) { textures[i] = null; continue; }
@@ -339,15 +341,23 @@ export function createWebGlBridge(root, getWasm) {
 			if (t && tm.target) {
 				c.bindTexture(tm.target, t);
 				if (Array.isArray(tm.mips) && tm.mips.length > 0) {
+					let hasPixels = false;
 					for (let lvl = 0; lvl < tm.mips.length; lvl++) {
 						const m = tm.mips[lvl];
 						if (m && m.width > 0 && m.height > 0) {
-							if (m.pixels) c.pixelStorei(c.UNPACK_ALIGNMENT, m.unpackAlignment || 1);
+							if (m.pixels) {
+								hasPixels = true;
+								c.pixelStorei(c.UNPACK_ALIGNMENT, m.unpackAlignment || 1);
+							}
 							c.texImage2D(m.target || tm.target, lvl, m.internalformat, m.width, m.height, m.border, m.format, m.type, m.pixels);
 						}
 					}
+					if (!hasPixels && tm.width > 0 && tm.height > 0) {
+						nullFboTexIds.add(i);
+					}
 				} else if (tm.width > 0 && tm.height > 0) {
 					if (tm.pixels) c.pixelStorei(c.UNPACK_ALIGNMENT, tm.unpackAlignment || 1);
+					else nullFboTexIds.add(i);
 					c.texImage2D(tm.target, tm.level, tm.internalformat, tm.width, tm.height, tm.border, tm.format, tm.type, tm.pixels);
 				}
 				for (const [pname, param] of tm.params) {
@@ -373,13 +383,63 @@ export function createWebGlBridge(root, getWasm) {
 			const f = c.createFramebuffer();
 			framebuffers[i] = f;
 			c.bindFramebuffer(c.FRAMEBUFFER, f);
+			let clearMask = 0;
+			let hasNullTexAtt = false;
+			let maxW = 0, maxH = 0;
 			for (const a of fm.attachments) {
-				if (a.rb) c.framebufferRenderbuffer(a.target, a.attachment, c.RENDERBUFFER, renderbuffers[a.id] || null);
-				else c.framebufferTexture2D(a.target, a.attachment, a.textarget, textures[a.id] || null, a.level);
+				if (a.rb) {
+					c.framebufferRenderbuffer(a.target, a.attachment, c.RENDERBUFFER, renderbuffers[a.id] || null);
+					const rm = renderbufferMeta[a.id];
+					if (rm) {
+						if (rm.width > maxW) maxW = rm.width;
+						if (rm.height > maxH) maxH = rm.height;
+					}
+				} else {
+					c.framebufferTexture2D(a.target, a.attachment, a.textarget, textures[a.id] || null, a.level);
+					if (nullFboTexIds.has(a.id)) hasNullTexAtt = true;
+					const tm = textureMeta[a.id];
+					if (tm) {
+						if (tm.width > maxW) maxW = tm.width;
+						if (tm.height > maxH) maxH = tm.height;
+					}
+				}
+				if (a.attachment >= 0x8CE0 && a.attachment <= 0x8CFF) clearMask |= 0x4000;
+				else if (a.attachment === 0x8D00) clearMask |= 0x0100;
+				else if (a.attachment === 0x8D20) clearMask |= 0x0400;
+				else if (a.attachment === 0x821A) clearMask |= 0x0500;
+			}
+			if (hasNullTexAtt && clearMask && typeof c.clear === 'function' && c.checkFramebufferStatus(c.FRAMEBUFFER) === 0x8CD5) {
+				if (typeof c.disable === 'function') c.disable(0x0C11);
+				if (typeof c.colorMask === 'function') c.colorMask(true, true, true, true);
+				if (typeof c.depthMask === 'function') c.depthMask(true);
+				if (typeof c.stencilMask === 'function') c.stencilMask(0xFF);
+				if (typeof c.clearColor === 'function') c.clearColor(0, 0, 0, 0);
+				if (typeof c.clearDepth === 'function') c.clearDepth(1);
+				if (typeof c.clearStencil === 'function') c.clearStencil(0);
+				if (typeof c.viewport === 'function' && maxW > 0 && maxH > 0) c.viewport(0, 0, maxW, maxH);
+				c.clear(clearMask);
 			}
 		}
 		c.bindFramebuffer(c.FRAMEBUFFER, null);
 		currentBoundFramebufferId = 0;
+		if (typeof c.viewport === 'function' && glCanvas && glCanvas.width > 0 && glCanvas.height > 0) {
+			c.viewport(0, 0, glCanvas.width, glCanvas.height);
+		}
+		if (typeof c.activeTexture === 'function') {
+			for (let u = 0; u < 32; u++) {
+				const id2d = boundTextures2D[u] || 0;
+				const idCube = boundTexturesCube[u] || 0;
+				if (u === 0 || id2d > 0) {
+					c.activeTexture(0x84C0 + u);
+					c.bindTexture(0x0DE1, id2d > 0 ? (textures[id2d] || null) : null);
+				}
+				if (idCube > 0) {
+					c.activeTexture(0x84C0 + u);
+					c.bindTexture(0x8513, textures[idCube] || null);
+				}
+			}
+			c.activeTexture(0x84C0 + currentActiveTextureUnit);
+		}
 		c.bindBuffer(c.ARRAY_BUFFER, currentBoundArrayBufferId > 0 ? (buffers[currentBoundArrayBufferId] || null) : null);
 		c.bindBuffer(c.ELEMENT_ARRAY_BUFFER, currentBoundElementBufferId > 0 ? (buffers[currentBoundElementBufferId] || null) : null);
 		if (currentProgramId > 0) {
@@ -416,7 +476,19 @@ export function createWebGlBridge(root, getWasm) {
 
 	let currentBoundArrayBufferId = 0;
 	let currentBoundElementBufferId = 0;
-	let currentBoundTextureId = 0;
+	let currentActiveTextureUnit = 0;
+	const boundTextures2D = new Array(32).fill(0);
+	const boundTexturesCube = new Array(32).fill(0);
+
+	function boundTextureMap(target) {
+		return target === 0x8513 ? boundTexturesCube : boundTextures2D;
+	}
+	function getBoundTextureId(target) {
+		return boundTextureMap(target)[currentActiveTextureUnit] || 0;
+	}
+	function setBoundTextureId(target, texId) {
+		boundTextureMap(target)[currentActiveTextureUnit] = texId | 0;
+	}
 
 	return {
 		mount() {
@@ -428,6 +500,9 @@ export function createWebGlBridge(root, getWasm) {
 			parallelCompileExt = undefined;
 			currentProgramId = 0;
 			currentUnpackAlignment = 4;
+			currentActiveTextureUnit = 0;
+			boundTextures2D.fill(0);
+			boundTexturesCube.fill(0);
 			if (shaderWorker) {
 				try { shaderWorker.terminate(); } catch (_) {}
 				shaderWorker = null;
@@ -729,6 +804,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					if (!c) return 0;
 					const t = c.createTexture();
+					if (!t) return 0;
 					textures.push(t);
 					textureMeta.push({ target: 0, params: [], mips: [], level: 0, internalformat: 0, width: 0, height: 0, border: 0, format: 0, type: 0, unpackAlignment: 4, pixels: null });
 					return textures.length - 1;
@@ -741,22 +817,33 @@ export function createWebGlBridge(root, getWasm) {
 						textures[texId] = null;
 						textureMeta[texId] = null;
 					}
+					for (let u = 0; u < 32; u++) {
+						if (boundTextures2D[u] === texId) boundTextures2D[u] = 0;
+						if (boundTexturesCube[u] === texId) boundTexturesCube[u] = 0;
+					}
 				},
 				glBindTexture(target, texId) {
 					const c = getGl();
-					currentBoundTextureId = texId;
-					const t = texId > 0 ? textures[texId] : null;
+					setBoundTextureId(target, texId);
+					let t = texId > 0 ? textures[texId] : null;
+					if (c && texId > 0 && !t && textureMeta[texId] && !(typeof c.isContextLost === 'function' && c.isContextLost())) {
+						t = c.createTexture();
+						textures[texId] = t || null;
+					}
 					if (c) c.bindTexture(target, t || null);
 				},
 				glActiveTexture(texture) {
 					const c = getGl();
+					const unit = (texture - 0x84C0) | 0;
+					if (unit >= 0 && unit < 32) currentActiveTextureUnit = unit;
 					if (c) c.activeTexture(texture);
 				},
 				glTexParameteri(target, pname, param) {
 					const c = getGl();
-					if (currentBoundTextureId && textureMeta[currentBoundTextureId]) {
-						textureMeta[currentBoundTextureId].target = target;
-						textureMeta[currentBoundTextureId].params.push([pname, param]);
+					const boundId = getBoundTextureId(target);
+					if (boundId && textureMeta[boundId]) {
+						textureMeta[boundId].target = target;
+						textureMeta[boundId].params.push([pname, param]);
 					}
 					if (c) c.texParameteri(target, pname, param);
 				},
@@ -770,7 +857,8 @@ export function createWebGlBridge(root, getWasm) {
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory) return;
 					const ptr = pixelsPtr >>> 0;
-					const tm = currentBoundTextureId ? textureMeta[currentBoundTextureId] : null;
+					const boundId = getBoundTextureId(target);
+					const tm = boundId ? textureMeta[boundId] : null;
 					const lvl = level | 0;
 					if (!ptr) {
 						if (tm) {
@@ -841,7 +929,8 @@ export function createWebGlBridge(root, getWasm) {
 					const ptr = pixelsPtr >>> 0;
 					const lvl = level | 0;
 					const count = width * height;
-					const tm = currentBoundTextureId ? textureMeta[currentBoundTextureId] : null;
+					const boundId = getBoundTextureId(target);
+					const tm = boundId ? textureMeta[boundId] : null;
 					const m = (tm && tm.mips) ? tm.mips[lvl] : null;
 					if (type === 0x1402) {
 						const view = new Int16Array(exports.memory.buffer, ptr, count);
