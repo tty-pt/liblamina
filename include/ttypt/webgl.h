@@ -90,6 +90,8 @@ typedef unsigned int GLbitfield;
 #define GL_DEPTH_ATTACHMENT       0x8D00
 #define GL_FRAMEBUFFER_COMPLETE   0x8CD5
 #define GL_RGBA8                  0x8058
+#define GL_RGBA16F                0x881A
+#define GL_HALF_FLOAT             0x140B
 #define GL_R8                     0x8229
 #define GL_RED                    0x1903
 #define GL_DEPTH_COMPONENT        0x1902

@@ -249,6 +249,8 @@ export function createWebGlBridge(root, getWasm) {
 	}
 
 	let parallelCompileExt = undefined;
+	let anisoExt = null;
+	let maxAniso = 1;
 
 	function finalizeLocalProgramLink(c, programId) {
 		const pm = programMeta[programId];
@@ -361,7 +363,11 @@ export function createWebGlBridge(root, getWasm) {
 					c.texImage2D(tm.target, tm.level, tm.internalformat, tm.width, tm.height, tm.border, tm.format, tm.type, tm.pixels);
 				}
 				for (const [pname, param] of tm.params) {
-					c.texParameteri(tm.target, pname, param);
+					if (pname === 0x84FE) {
+						if (anisoExt) c.texParameterf(tm.target, 0x84FE, Math.min(maxAniso, Math.max(1, param)));
+					} else {
+						c.texParameteri(tm.target, pname, param);
+					}
 				}
 			}
 			textures[i] = t;
@@ -462,6 +468,14 @@ export function createWebGlBridge(root, getWasm) {
 			parallelCompileExt = (gl && typeof gl.getExtension === 'function')
 				? gl.getExtension('KHR_parallel_shader_compile')
 				: null;
+			if (gl && typeof gl.getExtension === 'function') {
+				gl.getExtension('EXT_color_buffer_float');
+				gl.getExtension('EXT_color_buffer_half_float');
+				anisoExt = gl.getExtension('EXT_texture_filter_anisotropic')
+					|| gl.getExtension('WEBKIT_EXT_texture_filter_anisotropic')
+					|| gl.getExtension('MOZ_EXT_texture_filter_anisotropic');
+				maxAniso = anisoExt ? (gl.getParameter(anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1) : 1;
+			}
 			if (prevCanvas && prevCanvas !== canvas && gl) {
 				rebuildContextResources(gl);
 			}
@@ -498,6 +512,8 @@ export function createWebGlBridge(root, getWasm) {
 			gl = null;
 			glCanvas = null;
 			parallelCompileExt = undefined;
+			anisoExt = null;
+			maxAniso = 1;
 			currentProgramId = 0;
 			currentUnpackAlignment = 4;
 			currentActiveTextureUnit = 0;
@@ -845,7 +861,12 @@ export function createWebGlBridge(root, getWasm) {
 						textureMeta[boundId].target = target;
 						textureMeta[boundId].params.push([pname, param]);
 					}
-					if (c) c.texParameteri(target, pname, param);
+					if (!c) return;
+					if (pname === 0x84FE) {
+						if (anisoExt) c.texParameterf(target, 0x84FE, Math.min(maxAniso, Math.max(1, param)));
+					} else {
+						c.texParameteri(target, pname, param);
+					}
 				},
 				glPixelStorei(pname, param) {
 					const c = getGl();
