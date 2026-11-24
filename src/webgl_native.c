@@ -45,6 +45,8 @@ typedef struct {
 } saved_gl_state_t;
 
 static lam_webgl_surface_t *g_active_surface = NULL;
+static int                  g_begin_depth = 0;
+static GLuint               g_bound_draw_fbo = 0;
 static saved_gl_state_t     g_saved_state;
 
 /* Reusable GL texture for lam_canvas_flush() (2D software canvas -> GL) */
@@ -61,8 +63,9 @@ static void surface_alloc_storage(lam_webgl_surface_t *s, uint32_t w, uint32_t h
 	if (w == 0) w = 1;
 	if (h == 0) h = 1;
 
-	GLint prev_fbo = 0, prev_tex = 0, prev_rbo = 0;
-	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+	GLint prev_draw_fbo = 0, prev_read_fbo = 0, prev_tex = 0, prev_rbo = 0;
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw_fbo);
+	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
 	glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
 	glGetIntegerv(GL_RENDERBUFFER_BINDING, &prev_rbo);
 
@@ -95,7 +98,8 @@ static void surface_alloc_storage(lam_webgl_surface_t *s, uint32_t w, uint32_t h
 
 	glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)prev_rbo);
 	glBindTexture(GL_TEXTURE_2D, (GLuint)prev_tex);
-	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw_fbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
 }
 
 lam_webgl_surface_t *lam_webgl_surface_create(uint32_t w, uint32_t h)
@@ -126,8 +130,11 @@ void lam_webgl_surface_destroy(lam_webgl_surface_t *s)
 {
 	if (!s)
 		return;
-	if (g_active_surface == s)
+	if (g_active_surface == s) {
 		g_active_surface = NULL;
+		g_begin_depth = 0;
+		g_bound_draw_fbo = 0;
+	}
 	if (s->default_vao)
 		glDeleteVertexArrays(1, &s->default_vao);
 	if (s->depth_stencil_rbo)
@@ -179,20 +186,24 @@ void lam_webgl_begin(lam_webgl_surface_t *s)
 	if (!s)
 		return;
 
-	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &g_saved_state.fbo);
-	glGetIntegerv(GL_VIEWPORT, g_saved_state.viewport);
-	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &g_saved_state.vao);
-	glGetIntegerv(GL_CURRENT_PROGRAM, &g_saved_state.prog);
-	glGetIntegerv(GL_ACTIVE_TEXTURE, &g_saved_state.active_tex);
-	glGetIntegerv(GL_UNPACK_ALIGNMENT, &g_saved_state.unpack_align);
-	g_saved_state.depth_test   = glIsEnabled(GL_DEPTH_TEST);
-	g_saved_state.blend        = glIsEnabled(GL_BLEND);
-	g_saved_state.cull_face    = glIsEnabled(GL_CULL_FACE);
-	g_saved_state.stencil_test = glIsEnabled(GL_STENCIL_TEST);
-	g_saved_state.scissor_test = glIsEnabled(GL_SCISSOR_TEST);
-	g_saved_state.poly_offset  = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+	if (g_begin_depth == 0) {
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &g_saved_state.fbo);
+		glGetIntegerv(GL_VIEWPORT, g_saved_state.viewport);
+		glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &g_saved_state.vao);
+		glGetIntegerv(GL_CURRENT_PROGRAM, &g_saved_state.prog);
+		glGetIntegerv(GL_ACTIVE_TEXTURE, &g_saved_state.active_tex);
+		glGetIntegerv(GL_UNPACK_ALIGNMENT, &g_saved_state.unpack_align);
+		g_saved_state.depth_test   = glIsEnabled(GL_DEPTH_TEST);
+		g_saved_state.blend        = glIsEnabled(GL_BLEND);
+		g_saved_state.cull_face    = glIsEnabled(GL_CULL_FACE);
+		g_saved_state.stencil_test = glIsEnabled(GL_STENCIL_TEST);
+		g_saved_state.scissor_test = glIsEnabled(GL_SCISSOR_TEST);
+		g_saved_state.poly_offset  = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+	}
 
+	g_begin_depth++;
 	g_active_surface = s;
+	g_bound_draw_fbo = 0;
 	glDisable(GL_SCISSOR_TEST);
 	glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
 	glBindVertexArray(s->default_vao);
@@ -201,10 +212,15 @@ void lam_webgl_begin(lam_webgl_surface_t *s)
 
 void lam_webgl_end(void)
 {
-	if (!g_active_surface)
+	if (g_begin_depth <= 0)
+		return;
+
+	g_begin_depth--;
+	if (g_begin_depth > 0)
 		return;
 
 	g_active_surface = NULL;
+	g_bound_draw_fbo = 0;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)g_saved_state.fbo);
 	glViewport(g_saved_state.viewport[0], g_saved_state.viewport[1],
@@ -296,6 +312,13 @@ static const char *copy_slice_z(const char *name, size_t len,
 
 void lam_glViewport(GLint x, GLint y, GLsizei width, GLsizei height)
 {
+	if (g_active_surface && g_bound_draw_fbo == 0 &&
+	    x == 0 && y == 0 && width > 0 && height > 0) {
+		uint32_t uw = (uint32_t)width;
+		uint32_t uh = (uint32_t)height;
+		if (uw != g_active_surface->w || uh != g_active_surface->h)
+			surface_alloc_storage(g_active_surface, uw, uh);
+	}
 	glViewport(x, y, width, height);
 }
 
@@ -649,6 +672,8 @@ void lam_glDeleteFramebuffer(GLuint fb)
 
 void lam_glBindFramebuffer(GLenum target, GLuint fb)
 {
+	if (target == GL_FRAMEBUFFER || target == GL_DRAW_FRAMEBUFFER)
+		g_bound_draw_fbo = fb;
 	GLuint actual = (fb == 0 && g_active_surface) ? g_active_surface->fbo : fb;
 	glBindFramebuffer(target, actual);
 }

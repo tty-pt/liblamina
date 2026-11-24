@@ -186,12 +186,68 @@ static void test_canvas_flush_and_window_api(void)
 	printf("  test_canvas_flush_and_window_api: PASS\n");
 }
 
+static void test_reentrant_and_viewport_autofit(void)
+{
+	lam_webgl_surface_t *surf = lam_webgl_surface_create(128, 96);
+	assert(surf != NULL);
+
+	/* Ensure baseline 2D compositor state via lam_clear */
+	lam_clear(0xFF000000u);
+
+	lam_webgl_begin(surf);
+
+	/* Offscreen FBO viewport must NOT resize the main surface */
+	GLuint off_fbo = glCreateFramebuffer();
+	GLuint off_rb  = glCreateRenderbuffer();
+	glBindFramebuffer(GL_FRAMEBUFFER, off_fbo);
+	glBindRenderbuffer(GL_RENDERBUFFER, off_rb);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, 0, GL_RGBA8, 32, 24);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+	                          GL_RENDERBUFFER, off_rb);
+	assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+	glViewport(0, 0, 32, 24);
+	uint32_t sw = 0, sh = 0;
+	lam_webgl_surface_size(surf, &sw, &sh);
+	assert(sw == 128 && sh == 96);
+
+	/* Default FBO (fb=0) viewport at scaled resolution MUST auto-fit the surface */
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glViewport(0, 0, 96, 72);
+	lam_webgl_surface_size(surf, &sw, &sh);
+	assert(sw == 96 && sh == 72);
+
+	/* Nested begin/end must preserve outer begin state and render to surface */
+	lam_webgl_begin(surf);
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+	glClearColor(0.25f, 0.75f, 0.50f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	lam_webgl_end();
+
+	/* Outer begin is still active: draw still targets surf->fbo */
+	glDeleteRenderbuffer(off_rb);
+	glDeleteFramebuffer(off_fbo);
+	lam_webgl_end();
+
+	uint8_t px[4] = {0, 0, 0, 0};
+	assert(lam_webgl_surface_read_rgba(surf, 90, 68, 1, 1, px) == 1);
+	assert(px[0] >= 60  && px[0] <= 68);
+	assert(px[1] >= 187 && px[1] <= 195);
+	assert(px[2] >= 123 && px[2] <= 132);
+	assert(px[3] >= 250);
+
+	lam_webgl_surface_destroy(surf);
+	printf("  test_reentrant_and_viewport_autofit: PASS (size=%ux%u pixel=%u,%u,%u,%u)\n",
+	       sw, sh, px[0], px[1], px[2], px[3]);
+}
+
 int main(void)
 {
 	printf("test_webgl:\n");
 	lam_init();
 	test_surface_and_es300_pipeline();
 	test_canvas_flush_and_window_api();
+	test_reentrant_and_viewport_autofit();
 	lam_deinit();
 	printf("test_webgl: ALL TESTS PASSED\n");
 	return 0;
