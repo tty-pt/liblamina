@@ -269,6 +269,77 @@ void lam_ui_set_attr(lam_ui_div_t *div, const char *name, const char *val)
 	div->n_attrs++;
 }
 
+void lam_ui_remove_attr(lam_ui_div_t *div, const char *name)
+{
+	if (!div || !name) return;
+	for (uint16_t i = 0; i < div->n_attrs; i++) {
+		if (strcmp(div->attrs[i].name, name) == 0) {
+			free(div->attrs[i].name);
+			free(div->attrs[i].val);
+			for (uint16_t j = (uint16_t)(i + 1); j < div->n_attrs; j++)
+				div->attrs[j - 1] = div->attrs[j];
+			div->n_attrs--;
+			lam_ui_mark_dirty(div);
+			return;
+		}
+	}
+}
+
+void lam_ui_remove_child(lam_ui_div_t *parent, lam_ui_div_t *child)
+{
+	if (!parent || !child || child->parent != parent) return;
+	lam_ui_div_t *prev = NULL;
+	for (lam_ui_div_t *c = parent->first_child; c; c = c->next_sibling) {
+		if (c == child) {
+			if (prev)
+				prev->next_sibling = child->next_sibling;
+			else
+				parent->first_child = child->next_sibling;
+			if (parent->last_child == child)
+				parent->last_child = prev;
+			child->parent = NULL;
+			child->next_sibling = NULL;
+			lam_ui_mark_dirty(parent);
+			return;
+		}
+		prev = c;
+	}
+}
+
+void lam_ui_insert_before(lam_ui_div_t *parent, lam_ui_div_t *child, lam_ui_div_t *before)
+{
+	if (!parent || !child || child == before) return;
+	if (child->parent)
+		lam_ui_remove_child(child->parent, child);
+
+	child->parent = parent;
+	if (before && before->parent == parent) {
+		lam_ui_div_t *prev = NULL;
+		for (lam_ui_div_t *c = parent->first_child; c; c = c->next_sibling) {
+			if (c == before) {
+				child->next_sibling = before;
+				if (prev)
+					prev->next_sibling = child;
+				else
+					parent->first_child = child;
+				lam_ui_mark_dirty(parent);
+				return;
+			}
+			prev = c;
+		}
+	}
+
+	child->next_sibling = NULL;
+	if (!parent->first_child) {
+		parent->first_child = child;
+		parent->last_child = child;
+	} else {
+		parent->last_child->next_sibling = child;
+		parent->last_child = child;
+	}
+	lam_ui_mark_dirty(parent);
+}
+
 void lam_ui_set_inline_style(lam_ui_div_t *div, const char *css_decls)
 {
 	if (!div) return;

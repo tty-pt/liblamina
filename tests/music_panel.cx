@@ -1,0 +1,53 @@
+#include <bud/bud_reconcile.h>
+
+static component LikeButton(const char *label, const char *id) {
+	int *likes = bud_use_state(int, 0);
+	return (
+		<button
+			id={id}
+			class="btn"
+			data-likes={*likes}
+			onClick={[int *likes](bud_event *e) {
+				bud_set(likes, *likes + 1);
+			}}
+		>
+			{label}:{*likes}
+		</button>
+	);
+}
+
+static component TrackBadge(const char *prefix, int count) {
+	return (
+		<>
+			<span class="badge" data-count={count}>
+				{prefix} ({count})
+			</span>
+		</>
+	);
+}
+
+component MusicPanel(const char *const *songs, size_t count, int *deleted_idx_out) {
+	return (
+		<div class="panel">
+			<div class="toolbar">
+				<LikeButton label="Band" id="like-band" />
+				<LikeButton label="Encore" id="like-encore" />
+				<TrackBadge prefix="Tracks" count={(int)count} />
+			</div>
+			<ul class="songs">
+				{for (size_t i = 0; i < count; i++)
+					<li
+						key={songs[i]}
+						class="song-row"
+						onClick={[deleted_idx_out, int idx = (int)i]() {
+							*deleted_idx_out = idx;
+						}}
+					>
+						{songs[i]}
+					</li>
+				}
+				{if (count == 0) <li class="empty">No songs</li>}
+			</ul>
+		</div>
+	);
+}

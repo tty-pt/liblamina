@@ -16,6 +16,7 @@
 /tests/test_webgl
 /tests/test_fonts_ttf
 /tests/test_css_parser
+/tests/test_bud_lamina
 !/tests/*.c
 /examples/*
 !/examples/*.c
