@@ -166,18 +166,12 @@ void lam_cache_build(lam_ui_div_t *d)
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
     glGetIntegerv(GL_VIEWPORT, vp);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    lam_set_viewport(fbo, c->w, c->h);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                           GL_TEXTURE_2D, tex, 0);
-    glViewport(0, 0, (GLint)c->w, (GLint)c->h);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    /*
-     * Translate the div subtree so that (d->x, d->y) maps to (pl, pt)
-     * inside the FBO. This is the *only* translation needed,
-     * as (pl, pt) already account for shadow offsets.
-     */
     ox = -((int32_t)d->x) + pl;
     oy = -((int32_t)d->y) + pt;
 
@@ -191,12 +185,22 @@ void lam_cache_build(lam_ui_div_t *d)
     c->dirty = old_dirty;
 
     /* restore previous framebuffer and viewport */
-    glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
-    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    lam_set_viewport((GLuint)prev_fbo, (uint32_t)vp[2], (uint32_t)vp[3]);
     glDeleteFramebuffers(1, &fbo);
 
     c->tex = tex;
     c->dirty = 0;
+}
+
+void lam_cache_free_div(lam_ui_div_t *d)
+{
+	if (!d || !d->_cache)
+		return;
+	lam_cache_t *c = DIV_CACHE(d);
+	if (c->tex && lam_has_gl())
+		glDeleteTextures(1, &c->tex);
+	free(c);
+	d->_cache = NULL;
 }
 
 /* draw cached image */
@@ -208,17 +212,15 @@ void lam_cache_draw(const lam_ui_div_t *d, int32_t x, int32_t y)
 	if (!c || !c->tex)
 		return;
 
-	/* only draw inside div area */
 	dst[0] = (float)x;
 	dst[1] = (float)y;
 	dst[2] = (float)d->w;
 	dst[3] = (float)d->h;
 
-	/* UV rect to sample only the central portion (excluding shadow margins) */
 	uv[0] = (float)c->pad_l / (float)c->w;
-	uv[1] = (float)c->pad_t / (float)c->h;
+	uv[1] = 1.0f - (float)c->pad_t / (float)c->h;
 	uv[2] = (float)(c->pad_l + d->w) / (float)c->w;
-	uv[3] = (float)(c->pad_t + d->h) / (float)c->h;
+	uv[3] = 1.0f - (float)(c->pad_t + d->h) / (float)c->h;
 
 	glUseProgram(g_prog_tex);
 	glBindVertexArray(g_vao_dummy);
@@ -227,6 +229,7 @@ void lam_cache_draw(const lam_ui_div_t *d, int32_t x, int32_t y)
 	glUniform4fv(g_uDst_tex, 1, dst);
 	glUniform4fv(g_uUV_tex, 1, uv);
 	glUniform4fv(g_uTint_tex, 1, tint);
+	lam_apply_ortho(g_uProj_tex);
 	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
 

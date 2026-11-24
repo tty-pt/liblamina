@@ -28,9 +28,12 @@ GLint  g_uUV_3d = -1, g_uTint_3d = -1, g_uSampler_3d = -1;
 
 GLuint g_prog_tex;
 static GLuint g_prog_fill;
+static GLuint g_prog_glyph;
 GLint  g_uProj_tex, g_uDst_tex, g_uUV_tex,
        g_uTint_tex, g_uSampler;
 static GLint  g_uProj_fill, g_uDst_fill, g_uColor_fill;
+static GLint  g_uProj_glyph, g_uDst_glyph, g_uUV_glyph,
+              g_uTint_glyph, g_uSampler_glyph;
 
 GLuint g_vao_dummy;
 
@@ -39,6 +42,7 @@ uint32_t lam_height, lam_width;
 screen_t screen;
 
 float lam_ortho_M[16];
+static float g_dpi_scale = 1.0f;
 
 /* current render target (can be screen or offscreen cache) */
 GLuint g_view_fbo = 0;
@@ -66,6 +70,27 @@ static const char *FS_TEX = "#version 330 core\n"
 "uniform vec4 uTint; // RGBA 0..1\n"
 "out vec4 FragColor;\n"
 "void main(){ FragColor = texture(uTex, vUV) * uTint; }\n";
+
+/* Dual-source blending shader for LCD subpixel & grayscale glyphs with
+ * luminance-adaptive sRGB stem-contrast correction (prevents light-on-dark
+ * stem erosion without bloating dark text or black text shadows). */
+static const char *FS_GLYPH_LCD = "#version 330 core\n"
+"in vec2 vUV;\n"
+"uniform sampler2D uTex;\n"
+"uniform vec4 uTint;\n"
+"layout(location = 0, index = 0) out vec4 FragColor;\n"
+"layout(location = 0, index = 1) out vec4 FragMask;\n"
+"void main(){\n"
+"  vec3 cov = texture(uTex, vUV).rgb;\n"
+"  float luma = dot(uTint.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
+"  float inv_gamma = mix(1.08, 1.0 / 1.55, luma);\n"
+"  cov = pow(clamp(cov, 0.0, 1.0), vec3(inv_gamma));\n"
+"  vec3 mask_rgb = cov * uTint.a;\n"
+"  float mask_a = max(max(mask_rgb.r, mask_rgb.g), mask_rgb.b);\n"
+"  if (mask_a < 0.002) discard;\n"
+"  FragColor = vec4(uTint.rgb, mask_a);\n"
+"  FragMask  = vec4(mask_rgb, mask_a);\n"
+"}\n";
 
 static const char *VS_3D = "#version 330 core\n"
 "uniform mat4 uMVP;\n"
@@ -231,6 +256,8 @@ static void gl_init(uint32_t *w_r, uint32_t *h_r)
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_BYTE, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	// attach texture to FBO
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_tex, 0);
@@ -270,6 +297,9 @@ static void gl_init(uint32_t *w_r, uint32_t *h_r)
 	g_prog_3d   = lam_link(
 			lam_compile(GL_VERTEX_SHADER, VS_3D),
 			lam_compile(GL_FRAGMENT_SHADER, FS_3D));
+	g_prog_glyph = lam_link(
+			lam_compile(GL_VERTEX_SHADER, VS_TEX),
+			lam_compile(GL_FRAGMENT_SHADER, FS_GLYPH_LCD));
 
 	// uniform locations - tex
 	g_uProj_tex = glGetUniformLocation(g_prog_tex, "uProj");
@@ -277,6 +307,15 @@ static void gl_init(uint32_t *w_r, uint32_t *h_r)
 	g_uUV_tex   = glGetUniformLocation(g_prog_tex, "uUV");
 	g_uTint_tex = glGetUniformLocation(g_prog_tex, "uTint");
 	g_uSampler  = glGetUniformLocation(g_prog_tex, "uTex");
+
+	// uniform locations - glyph LCD
+	g_uProj_glyph    = glGetUniformLocation(g_prog_glyph, "uProj");
+	g_uDst_glyph     = glGetUniformLocation(g_prog_glyph, "uDst");
+	g_uUV_glyph      = glGetUniformLocation(g_prog_glyph, "uUV");
+	g_uTint_glyph    = glGetUniformLocation(g_prog_glyph, "uTint");
+	g_uSampler_glyph = glGetUniformLocation(g_prog_glyph, "uTex");
+	glUseProgram(g_prog_glyph);
+	glUniform1i(g_uSampler_glyph, 0);
 
 	// uniform locations - 3d
 	g_uMVP_3d     = glGetUniformLocation(g_prog_3d, "uMVP");
@@ -403,6 +442,96 @@ void lam_size(uint32_t *w, uint32_t *h)
 	*h = lam_height;
 }
 
+int lam_running(void)
+{
+	if (lam_be.running)
+		return lam_be.running();
+	return 1;
+}
+
+void lam_set_title(const char *title)
+{
+	if (lam_be.set_title)
+		lam_be.set_title(title);
+}
+
+void lam_set_cursor(lam_cursor_t cursor)
+{
+	if (lam_be.set_cursor)
+		lam_be.set_cursor((int)cursor);
+}
+
+float lam_content_scale(void)
+{
+	if (lam_be.content_scale) {
+		float s = lam_be.content_scale();
+		if (s >= 1.0f && s <= 4.0f)
+			return s;
+	}
+	return 1.0f;
+}
+
+void lam_set_dpi_scale(float scale)
+{
+	if (!(scale >= 1.0f && scale <= 4.0f))
+		scale = 1.0f;
+	g_dpi_scale = scale;
+}
+
+float lam_get_dpi_scale(void)
+{
+	return g_dpi_scale;
+}
+
+void lam_fbo_resize(uint32_t w, uint32_t h)
+{
+	if (w == 0 || h == 0)
+		return;
+	if (w == lam_width && h == lam_height)
+		return;
+
+	lam_width = w;
+	lam_height = h;
+
+	if (lam_be.init == dummy_be_init) {
+		free(screen.canvas);
+		screen.size = w * h * 4;
+		screen.canvas = calloc(1, screen.size);
+		screen.max_x = w;
+		screen.max_y = h;
+		return;
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, g_fbo);
+	glBindTexture(GL_TEXTURE_2D, g_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0,
+	             GL_BGRA, GL_UNSIGNED_BYTE, NULL);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, g_rbo_depth);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
+	                      (GLsizei)w, (GLsizei)h);
+
+	free(screen.canvas);
+	screen.size = w * h * 4;
+	screen.canvas = malloc(screen.size);
+	screen.max_x = w;
+	screen.max_y = h;
+
+	lam_ortho((float)w, (float)h, lam_ortho_M);
+	lam_reset_viewport();
+}
+
+void lam_resize(uint32_t w, uint32_t h)
+{
+	if (w == 0 || h == 0)
+		return;
+	if (lam_be.resize) {
+		lam_be.resize(w, h);
+		return;
+	}
+	lam_fbo_resize(w, h);
+}
+
 static void gl_deinit(void)
 {
 	const void *key, *val;
@@ -415,6 +544,10 @@ static void gl_deinit(void)
 	if (g_prog_3d) {
 		glDeleteProgram(g_prog_3d);
 		g_prog_3d = 0;
+	}
+	if (g_prog_glyph) {
+		glDeleteProgram(g_prog_glyph);
+		g_prog_glyph = 0;
 	}
 
 	glDeleteTextures(1, &g_tex);
@@ -530,6 +663,141 @@ void lam_tex_draw_x(uint32_t ref, int32_t x, int32_t y,
 	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
 
+void lam_tex_draw_gl(uint32_t gl_tex_id, int32_t x, int32_t y,
+                     uint32_t dw, uint32_t dh, int flip_y)
+{
+	if (lam_be.init == dummy_be_init || !gl_tex_id || !dw || !dh)
+		return;
+
+	glDisable(GL_DEPTH_TEST);
+
+	float dst[4]  = { (float)x, (float)y, (float)dw, (float)dh };
+	float uv[4]   = { 0.0f, flip_y ? 1.0f : 0.0f, 1.0f, flip_y ? 0.0f : 1.0f };
+	float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+	glUseProgram(g_prog_tex);
+	glBindVertexArray(g_vao_dummy);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, (GLuint)gl_tex_id);
+
+	glUniform4fv(g_uDst_tex, 1, dst);
+	glUniform4fv(g_uUV_tex,  1, uv);
+	glUniform4fv(g_uTint_tex, 1, rgba);
+	lam_apply_ortho(g_uProj_tex);
+
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
+int lam_has_gl(void)
+{
+	return lam_be.init != dummy_be_init && g_prog_tex != 0;
+}
+
+int lam_gl_tex_lookup(uint32_t ref, GLuint *out_id, uint32_t *out_w, uint32_t *out_h)
+{
+	if (!lam_has_gl())
+		return 0;
+	const gl_tex_info_t *tex = corm_get(g_tex_map_hd, &ref);
+	if (!tex || !tex->id || !tex->w || !tex->h)
+		return 0;
+	if (out_id) *out_id = tex->id;
+	if (out_w)  *out_w  = tex->w;
+	if (out_h)  *out_h  = tex->h;
+	return 1;
+}
+
+void lam_gl_draw_tex_rect_f(GLuint tex_id, uint32_t tw, uint32_t th,
+                            uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh,
+                            float dx, float dy, float dw, float dh,
+                            uint32_t tint)
+{
+	if (!lam_has_gl() || !tex_id || !tw || !th || !sw || !sh || dw <= 0.0f || dh <= 0.0f)
+		return;
+
+	glDisable(GL_DEPTH_TEST);
+
+	float u0 = (float)sx / (float)tw;
+	float v0 = (float)sy / (float)th;
+	float u1 = (float)(sx + sw) / (float)tw;
+	float v1 = (float)(sy + sh) / (float)th;
+
+	float dst[4] = { dx, dy, dw, dh };
+	float uv [4] = { u0, v0, u1, v1 };
+
+	float ta = ((tint >> 24) & 0xFF) / 255.0f;
+	float tr = ((tint >> 16) & 0xFF) / 255.0f;
+	float tg = ((tint >>  8) & 0xFF) / 255.0f;
+	float tb = ((tint      ) & 0xFF) / 255.0f;
+	float rgba[4] = { tr, tg, tb, ta };
+
+	glUseProgram(g_prog_tex);
+	glBindVertexArray(g_vao_dummy);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, tex_id);
+
+	glUniform4fv(g_uDst_tex, 1, dst);
+	glUniform4fv(g_uUV_tex,  1, uv);
+	glUniform4fv(g_uTint_tex, 1, rgba);
+	lam_apply_ortho(g_uProj_tex);
+
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
+void lam_gl_draw_tex_rect(GLuint tex_id, uint32_t tw, uint32_t th,
+                          uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh,
+                          int32_t dx, int32_t dy, uint32_t dw, uint32_t dh,
+                          uint32_t tint)
+{
+	lam_gl_draw_tex_rect_f(tex_id, tw, th, sx, sy, sw, sh,
+	                       (float)dx, (float)dy, (float)dw, (float)dh, tint);
+}
+
+void lam_gl_draw_glyph_lcd(GLuint tex_id, uint32_t tw, uint32_t th,
+                           uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh,
+                           float dx, float dy, float dw, float dh,
+                           uint32_t tint)
+{
+	if (!lam_has_gl() || !g_prog_glyph || !tex_id || !tw || !th || !sw || !sh ||
+	    dw <= 0.0f || dh <= 0.0f)
+		return;
+
+	glDisable(GL_DEPTH_TEST);
+
+	float u0 = (float)sx / (float)tw;
+	float v0 = (float)sy / (float)th;
+	float u1 = (float)(sx + sw) / (float)tw;
+	float v1 = (float)(sy + sh) / (float)th;
+
+	float dst[4] = { dx, dy, dw, dh };
+	float uv [4] = { u0, v0, u1, v1 };
+
+	float ta = ((tint >> 24) & 0xFF) / 255.0f;
+	float tr = ((tint >> 16) & 0xFF) / 255.0f;
+	float tg = ((tint >>  8) & 0xFF) / 255.0f;
+	float tb = ((tint      ) & 0xFF) / 255.0f;
+	float rgba[4] = { tr, tg, tb, ta };
+
+	glBlendFuncSeparate(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR,
+	                    GL_ONE, GL_ONE_MINUS_SRC1_ALPHA);
+
+	glUseProgram(g_prog_glyph);
+	glBindVertexArray(g_vao_dummy);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, tex_id);
+
+	glUniform4fv(g_uDst_glyph, 1, dst);
+	glUniform4fv(g_uUV_glyph,  1, uv);
+	glUniform4fv(g_uTint_glyph, 1, rgba);
+	lam_apply_ortho(g_uProj_glyph);
+
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
 void lam_tex_reg(uint32_t ref, uint8_t *data, uint32_t w, uint32_t h)
 {
 	gl_tex_info_t tex = { .w = w, .h = h, .id = 0 };
@@ -585,6 +853,8 @@ void lam_fill(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t color)
 	if (lam_be.init == dummy_be_init)
 		return;
 
+	glDisable(GL_DEPTH_TEST);
+
 	float a = ((color >> 24) & 0xFF) / 255.0f;
 	float r = ((color >> 16) & 0xFF) / 255.0f;
 	float g = ((color >>  8) & 0xFF) / 255.0f;
@@ -595,6 +865,7 @@ void lam_fill(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t color)
 
 	glUseProgram(g_prog_fill);
 	glBindVertexArray(g_vao_dummy);
+	lam_apply_ortho(g_uProj_fill);
 	glUniform4fv(g_uDst_fill, 1, dst);
 	glUniform4fv(g_uColor_fill, 1, rgba);
 	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
@@ -701,8 +972,8 @@ void lam_reset_viewport(void)
 void lam_apply_ortho(GLint uProj)
 {
     float M[16];
-    /* usa o viewport em vigor, não a matriz global do arranque */
-    lam_ortho((float)g_view_w, (float)g_view_h, M);
+    float s = (g_view_fbo == g_fbo && g_dpi_scale > 1.0f) ? g_dpi_scale : 1.0f;
+    lam_ortho((float)g_view_w / s, (float)g_view_h / s, M);
     glUniformMatrix4fv(uProj, 1, GL_FALSE, M);
 }
 

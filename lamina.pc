@@ -6,5 +6,5 @@ includedir=${prefix}/include
 Name: liblamina
 Description: Cross-platform 2D graphics library (OpenGL / GLFW / framebuffer)
 Version: 1.1.1
-Libs: -L${libdir} -llamina -lcorm -lstele -lpng -lxxhash
+Libs: -L${libdir} -llamina -lcorm -lstele -lpng -lfreetype -lxxhash
 Cflags: -I${includedir}

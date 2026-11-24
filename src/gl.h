@@ -66,4 +66,30 @@ void lam_tex_draw_quad_3d(uint32_t ref,
                           uint32_t sw, uint32_t sh,
                           uint32_t tint);
 
+int lam_has_gl(void);
+
+extern GLuint g_view_fbo;
+extern uint32_t g_view_w, g_view_h;
+
+void lam_gl_draw_tex_rect(GLuint tex_id, uint32_t tw, uint32_t th,
+                          uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh,
+                          int32_t dx, int32_t dy, uint32_t dw, uint32_t dh,
+                          uint32_t tint);
+
+void lam_gl_draw_tex_rect_f(GLuint tex_id, uint32_t tw, uint32_t th,
+                            uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh,
+                            float dx, float dy, float dw, float dh,
+                            uint32_t tint);
+
+void lam_gl_draw_glyph_lcd(GLuint tex_id, uint32_t tw, uint32_t th,
+                           uint32_t sx, uint32_t sy, uint32_t sw, uint32_t sh,
+                           float dx, float dy, float dw, float dh,
+                           uint32_t tint);
+
+int lam_gl_tex_lookup(uint32_t ref, GLuint *out_id, uint32_t *out_w, uint32_t *out_h);
+
+void lam_backdrop_blur_round(int32_t x, int32_t y, uint32_t w, uint32_t h,
+                             float tl, float tr, float br, float bl,
+                             float blur_px);
+
 #endif /* LAM_GL_H */

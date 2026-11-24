@@ -158,11 +158,36 @@ uint32_t lam_image_read(uint32_t img_id, void *dst_rgba, uint32_t max_bytes,
  */
 void lam_size(uint32_t *width, uint32_t *height);
 
+/** @brief Standard pointer cursor shapes for desktop backends. */
+typedef enum {
+	LAM_CURSOR_AUTO = 0,
+	LAM_CURSOR_DEFAULT,
+	LAM_CURSOR_POINTER,
+	LAM_CURSOR_TEXT,
+	LAM_CURSOR_MOVE,
+	LAM_CURSOR_CROSSHAIR,
+	LAM_CURSOR_NS_RESIZE,
+	LAM_CURSOR_EW_RESIZE,
+	LAM_CURSOR_NESW_RESIZE,
+	LAM_CURSOR_NWSE_RESIZE,
+	LAM_CURSOR_GRAB,
+	LAM_CURSOR_GRABBING,
+	LAM_CURSOR_NOT_ALLOWED,
+	LAM_CURSOR_COUNT
+} lam_cursor_t;
+
 /**
  * @brief Initialise the OpenGL context, window, and input system.
  */
 void lam_init(void);
 void lam_deinit(void);
+int  lam_running(void);
+void lam_set_title(const char *title);
+void lam_resize(uint32_t width, uint32_t height);
+void lam_set_cursor(lam_cursor_t cursor);
+float lam_content_scale(void);
+void  lam_set_dpi_scale(float scale);
+float lam_get_dpi_scale(void);
 
 /*───────────────────────────────────────────────*
  *                 RENDERING API                 *
@@ -220,6 +245,27 @@ void lam_tex_draw(uint32_t ref,
                   int32_t x, int32_t y,
                   uint32_t dw, uint32_t dh);
 
+void lam_tex_draw_gl(uint32_t gl_tex_id,
+                     int32_t x, int32_t y,
+                     uint32_t dw, uint32_t dh,
+                     int flip_y);
+
+void lam_tex_draw_rounded(uint32_t ref,
+                          int32_t x, int32_t y,
+                          uint32_t cx, uint32_t cy,
+                          uint32_t sw, uint32_t sh,
+                          uint32_t dw, uint32_t dh,
+                          float tl, float tr, float br, float bl,
+                          uint32_t tint);
+
+void lam_grad_rounded(uint32_t c0, uint32_t c1,
+                      uint8_t grad_type, float angle_deg,
+                      uint32_t border_color,
+                      int32_t x, int32_t y,
+                      uint32_t w, uint32_t h,
+                      float tl, float tr, float br, float bl,
+                      float border_width);
+
 unsigned lam_tex_load(const char *filename);
 void lam_tex_save(unsigned ref);
 void lam_tex_size(uint32_t *w, uint32_t *h, unsigned ref);
@@ -241,12 +287,34 @@ void lam_tint(uint32_t tint);
  * @{
  */
 
+typedef enum {
+	LAM_EV_KEY = 1,
+	LAM_EV_CHAR,
+	LAM_EV_MOUSE_MOVE,
+	LAM_EV_MOUSE_BTN,
+	LAM_EV_SCROLL,
+	LAM_EV_RESIZE
+} lam_event_type_t;
+
+typedef struct {
+	lam_event_type_t type;
+	int32_t  x, y;    /* cursor pos or new framebuffer size */
+	float    dx, dy;  /* scroll wheel delta */
+	uint32_t code;    /* GLFW key / mouse button / Unicode codepoint */
+	int32_t  action;  /* 0 = release, 1 = press, 2 = repeat */
+	int32_t  mods;    /* bitmask: 1=shift, 2=ctrl, 4=alt, 8=super */
+} lam_event_t;
+
+typedef void (*lam_event_cb_t)(const lam_event_t *ev, void *user);
+
 void lam_poll(void);
 void lam_key_reg(unsigned short key, lam_key_cb_t *cb);
 void lam_key_default_reg(lam_key_cb_t *cb);
 unsigned short lam_key_val(unsigned short code);
 int lam_key_parse(char *target, size_t len,
                   unsigned short code, int flags);
+void lam_event_reg(lam_event_cb_t cb, void *user);
+void lam_mouse_pos(int32_t *x, int32_t *y);
 
 /** @} */
 
@@ -254,8 +322,14 @@ int lam_key_parse(char *target, size_t len,
  *         WEBGL / HYBRID SSR FALLBACKS          *
  *───────────────────────────────────────────────*/
 
+uint32_t lam_canvas_gl_tex(uint32_t *out_w, uint32_t *out_h);
+
+#ifdef LAM_NATIVE_CLIENT
+void lam_canvas_flush(const void *buf, uint32_t w, uint32_t h);
+#else
 static inline void lam_canvas_flush(const void *buf, uint32_t w, uint32_t h)
 { (void)buf; (void)w; (void)h; }
+#endif
 
 static inline uint32_t lam_shader_register(const char *name, const char *frag_glsl)
 { (void)name; (void)frag_glsl; return 0; }

@@ -15,6 +15,38 @@ static input_t cbs[GLFW_KEY_LAST + 1];
 static unsigned keys[GLFW_KEY_LAST + 1];
 
 static lam_key_cb_t *lam_key_default;
+static lam_event_cb_t lam_event_cb;
+static void *lam_event_user;
+static int32_t lam_cur_mouse_x;
+static int32_t lam_cur_mouse_y;
+
+void
+input_emit_event(const lam_event_t *ev)
+{
+	if (lam_event_cb && ev)
+		lam_event_cb(ev, lam_event_user);
+}
+
+void
+input_set_mouse_pos(int32_t x, int32_t y)
+{
+	lam_cur_mouse_x = x;
+	lam_cur_mouse_y = y;
+}
+
+void
+lam_event_reg(lam_event_cb_t cb, void *user)
+{
+	lam_event_cb = cb;
+	lam_event_user = user;
+}
+
+void
+lam_mouse_pos(int32_t *x, int32_t *y)
+{
+	if (x) *x = lam_cur_mouse_x;
+	if (y) *y = lam_cur_mouse_y;
+}
 
 static char lam_key_chars[] = {
 	[LAM_KEY_1] = '1',

@@ -25,20 +25,11 @@ typedef struct {
 static unsigned img_be_hd, img_hd, img_name_hd;
 static uint32_t tint;
 
-void img_be_load(char *ext,
-		img_load_t *load,
-		img_save_t *save)
-{
-	img_be_t img_be = {
-		.load = load,
-		.save = save,
-	};
-
-	corm_put(img_be_hd, ext, &img_be);
-}
-
 void
 img_construct(void) {
+	if (img_be_hd)
+		return;
+
 	unsigned cm_img_be = corm_reg(sizeof(img_be_t)),
 		 cm_img = corm_reg(sizeof(img_t));
 
@@ -52,6 +43,21 @@ img_construct(void) {
 			CM_HNDL, 0xF, 0);
 
 	tint = lam_default_tint;
+}
+
+void img_be_load(char *ext,
+		img_load_t *load,
+		img_save_t *save)
+{
+	if (!img_be_hd)
+		img_construct();
+
+	img_be_t img_be = {
+		.load = load,
+		.save = save,
+	};
+
+	corm_put(img_be_hd, ext, &img_be);
 }
 
 __attribute__((constructor))
@@ -126,13 +132,23 @@ unsigned lam_tex_load(const char *filename) {
 	if (ref_r && corm_get(img_hd, ref_r))
 		return *ref_r;
 
-	CBUG(!ext, "IMG: invalid filename %s\n", filename);
+	if (!ext || !ext[1]) {
+		WARN("IMG: invalid filename %s\n", filename);
+		return CM_MISS;
+	}
 
 	be = (img_be_t *) corm_get(img_be_hd, ext + 1);
-	CBUG(!be, "IMG: %s backend not present.\n", ext);
+	if (!be) {
+		WARN("IMG: %s backend not present for %s\n", ext, filename);
+		return CM_MISS;
+	}
 
 	ref = be->load(filename);
+	if (ref == CM_MISS)
+		return CM_MISS;
 	img = (img_t *) corm_get(img_hd, &ref);
+	if (!img)
+		return CM_MISS;
 	img->be = be;
 
 	WARN("img_load %u: %s\n", ref, filename);
@@ -171,13 +187,19 @@ void lam_tex_draw(uint32_t ref, int32_t x, int32_t y,
 	const img_t *img = corm_get(img_hd, &ref);
 
 	lam_tex_draw_x(ref, x, y, 0, 0,
-			img->w, img->h, dw, dh, lam_default_tint);
+			img->w, img->h, dw, dh, tint);
 }
 
 void
 lam_tint(uint32_t atint)
 {
 	tint = atint;
+}
+
+uint32_t
+lam_tint_get(void)
+{
+	return tint;
 }
 
 void

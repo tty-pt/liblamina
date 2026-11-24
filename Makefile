@@ -12,23 +12,26 @@ LDFLAGS-Darwin += -framework OpenGL -framework Cocoa -framework IOKit -framework
 
 add-prefix-OpenBSD += /usr/X11R6
 
-LDLIBS := -lm -lxxhash -lcorm -lstele -lpng
+FT_CFLAGS := $(shell pkg-config --cflags freetype2 2>/dev/null || echo -I/usr/include/freetype2)
+FT_LDLIBS := $(shell pkg-config --libs freetype2 2>/dev/null || echo -lfreetype)
+
+LDLIBS := -lm -lxxhash -lcorm -lstele -lpng ${FT_LDLIBS}
 LDLIBS += ${LDLIBS-${BE}}
 
 LDLIBS-Linux += -lEGL
 LDLIBS-Linux += -Wl,--no-as-needed -lstele -Wl,--as-needed
 LDLIBS += ${LDLIBS-${uname}}
 
-obj-y := glfw img png
-obj-y += tile font cam particle
-obj-y += ui ui-style ui-cache shadow
+obj-y := glfw img png jpeg
+obj-y += tile font cam particle webgl_native
+obj-y += ui ui-style ui-css ui-cache shadow
 obj-y += input input-glfw
 liblamina-obj-y := ${obj-y:%=src/%.o}
 posix := fb input-dev
 liblamina-obj-y-Linux := ${posix:%=src/%.o}
 # liblamina-obj-y-OpenBSD := ${posix:%=src/%.o}
 
-CFLAGS := -g
+CFLAGS := -g ${FT_CFLAGS}
 all := liblamina
 
 WASM_SRCS := npm/wasm/lamina_wasm.c
@@ -57,7 +60,10 @@ TEST_BINS := ${TEST_DIR}/test_core${EXE} \
 	${TEST_DIR}/test_ui_style${EXE} \
 	${TEST_DIR}/test_ui_render${EXE} \
 	${TEST_DIR}/test_integration${EXE} \
-	${TEST_DIR}/test_particle${EXE}
+	${TEST_DIR}/test_particle${EXE} \
+	${TEST_DIR}/test_webgl${EXE} \
+	${TEST_DIR}/test_fonts_ttf${EXE} \
+	${TEST_DIR}/test_css_parser${EXE}
 
 ${TEST_DIR}:
 	@mkdir -p ${TEST_DIR}/fixtures 2>/dev/null || true
@@ -106,6 +112,18 @@ ${TEST_DIR}/test_particle${EXE}: ${TEST_DIR} ${TEST_DIR}/test_particle.c lib/lib
 	${cc} -o $@ ${TEST_DIR}/test_particle.c ${CFLAGS} ${TEST_CFLAGS} \
 		${LDFLAGS} ${TEST_LDFLAGS} ${TEST_LDLIBS}
 
+${TEST_DIR}/test_webgl${EXE}: ${TEST_DIR} ${TEST_DIR}/test_webgl.c lib/liblamina.${SO}
+	${cc} -o $@ ${TEST_DIR}/test_webgl.c -DLAM_WEBGL_NATIVE -DLAM_NATIVE_CLIENT ${CFLAGS} ${TEST_CFLAGS} \
+		${LDFLAGS} ${TEST_LDFLAGS} ${TEST_LDLIBS}
+
+${TEST_DIR}/test_fonts_ttf${EXE}: ${TEST_DIR} ${TEST_DIR}/test_fonts_ttf.c lib/liblamina.${SO}
+	${cc} -o $@ ${TEST_DIR}/test_fonts_ttf.c -DLAM_WEBGL_NATIVE -DLAM_NATIVE_CLIENT ${CFLAGS} ${TEST_CFLAGS} \
+		${LDFLAGS} ${TEST_LDFLAGS} ${TEST_LDLIBS}
+
+${TEST_DIR}/test_css_parser${EXE}: ${TEST_DIR} ${TEST_DIR}/test_css_parser.c lib/liblamina.${SO}
+	${cc} -o $@ ${TEST_DIR}/test_css_parser.c ${CFLAGS} ${TEST_CFLAGS} \
+		${LDFLAGS} ${TEST_LDFLAGS} ${TEST_LDLIBS}
+
 test-build: lib/liblamina.${SO} ${TEST_DIR}/fixtures/test_texture.png ${TEST_BINS}
 
 test: test-build
@@ -136,6 +154,12 @@ run-tests:
 	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_integration
 	@echo "Running test_particle..."
 	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_particle
+	@echo "Running test_webgl..."
+	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_webgl
+	@echo "Running test_fonts_ttf..."
+	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_fonts_ttf
+	@echo "Running test_css_parser..."
+	@LD_LIBRARY_PATH=./lib ./${TEST_DIR}/test_css_parser
 	@echo "All tests passed!"
 
 .PHONY: test test-build run-tests

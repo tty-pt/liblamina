@@ -2,6 +2,7 @@
 #include "../include/ttypt/lam-tm.h"
 #include "../include/ttypt/lam-cam.h"
 #include "./gl.h"
+#include "./tex.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -46,6 +47,7 @@ lam_tile_draw(uint32_t ref, uint32_t idx,
 	if (!h)
 		h = tm->h;
 
+	uint32_t cur_tint = lam_tint_get();
 	for (uint32_t iy = 0; iy < ry * h; iy += h)
 		for (uint32_t ix = 0; ix < rx * w; ix += w)
 			lam_tex_draw_x(tm->img,
@@ -54,7 +56,7 @@ lam_tile_draw(uint32_t ref, uint32_t idx,
 					tm_x * tm->w,
 					tm_y * tm->h,
 					tm->w, tm->h,
-					w, h, lam_default_tint);
+					w, h, cur_tint);
 }
 
 void

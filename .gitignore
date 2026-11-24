@@ -13,6 +13,9 @@
 /tests/test_ui_render
 /tests/test_integration
 /tests/test_particle
+/tests/test_webgl
+/tests/test_fonts_ttf
+/tests/test_css_parser
 !/tests/*.c
 /examples/*
 !/examples/*.c

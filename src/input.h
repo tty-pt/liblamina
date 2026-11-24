@@ -9,8 +9,13 @@ typedef struct {
 	input_deinit_t *deinit, *poll;
 } lam_input_t;
 
+#include "../include/ttypt/lam.h"
+
 void input_call(unsigned short code,
 		unsigned short value,
 		int type);
+
+void input_emit_event(const lam_event_t *ev);
+void input_set_mouse_pos(int32_t x, int32_t y);
 
 #endif /* LAM_INPUT_H */

@@ -1,0 +1,777 @@
+/*
+ * webgl_native.c — Native desktop OpenGL 3.3 Core backend for <ttypt/webgl.h>
+ * and native 2D canvas flush (<ttypt/lam.h>).
+ *
+ * Isolates WebGL2 state into a lam_webgl_surface_t (FBO + color texture +
+ * depth/stencil RBO + core-profile default VAO) so isomorphic WebGL2 C code
+ * (e.g. mods/nd/ux/nd_seven_gl*.c) runs unmodified alongside liblamina UI.
+ */
+
+#include "./gl.h"
+#include "./be.h"
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+#ifndef GL_COMPLETION_STATUS_KHR
+#define GL_COMPLETION_STATUS_KHR 0x91B1
+#endif
+
+typedef struct lam_webgl_surface {
+	GLuint   fbo;
+	GLuint   color_tex;
+	GLuint   depth_stencil_rbo;
+	GLuint   default_vao;
+	uint32_t w;
+	uint32_t h;
+} lam_webgl_surface_t;
+
+typedef struct {
+	GLint     fbo;
+	GLint     viewport[4];
+	GLint     vao;
+	GLint     prog;
+	GLboolean depth_test;
+	GLboolean blend;
+	GLboolean cull_face;
+	GLboolean stencil_test;
+	GLboolean scissor_test;
+	GLboolean poly_offset;
+	GLint     active_tex;
+	GLint     unpack_align;
+} saved_gl_state_t;
+
+static lam_webgl_surface_t *g_active_surface = NULL;
+static saved_gl_state_t     g_saved_state;
+
+/* Reusable GL texture for lam_canvas_flush() (2D software canvas -> GL) */
+static GLuint   g_canvas_tex = 0;
+static uint32_t g_canvas_w = 0;
+static uint32_t g_canvas_h = 0;
+
+/* -------------------------------------------------------------------------
+ * Surface lifecycle & GL state isolation
+ * ------------------------------------------------------------------------- */
+
+static void surface_alloc_storage(lam_webgl_surface_t *s, uint32_t w, uint32_t h)
+{
+	if (w == 0) w = 1;
+	if (h == 0) h = 1;
+
+	GLint prev_fbo = 0, prev_tex = 0, prev_rbo = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+	glGetIntegerv(GL_RENDERBUFFER_BINDING, &prev_rbo);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+
+	glBindTexture(GL_TEXTURE_2D, s->color_tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0,
+	             GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+	                       GL_TEXTURE_2D, s->color_tex, 0);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, s->depth_stencil_rbo);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+	                      (GLsizei)w, (GLsizei)h);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+	                          GL_RENDERBUFFER, s->depth_stencil_rbo);
+
+	GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE) {
+		fprintf(stderr, "lam_webgl: surface FBO incomplete (0x%x)\n",
+		        (unsigned)status);
+	}
+
+	s->w = w;
+	s->h = h;
+
+	glBindRenderbuffer(GL_RENDERBUFFER, (GLuint)prev_rbo);
+	glBindTexture(GL_TEXTURE_2D, (GLuint)prev_tex);
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+}
+
+lam_webgl_surface_t *lam_webgl_surface_create(uint32_t w, uint32_t h)
+{
+	lam_webgl_surface_t *s = calloc(1, sizeof(*s));
+	if (!s)
+		return NULL;
+
+	glGenFramebuffers(1, &s->fbo);
+	glGenTextures(1, &s->color_tex);
+	glGenRenderbuffers(1, &s->depth_stencil_rbo);
+	glGenVertexArrays(1, &s->default_vao);
+
+	surface_alloc_storage(s, w, h);
+	return s;
+}
+
+void lam_webgl_surface_resize(lam_webgl_surface_t *s, uint32_t w, uint32_t h)
+{
+	if (!s || w == 0 || h == 0)
+		return;
+	if (s->w == w && s->h == h)
+		return;
+	surface_alloc_storage(s, w, h);
+}
+
+void lam_webgl_surface_destroy(lam_webgl_surface_t *s)
+{
+	if (!s)
+		return;
+	if (g_active_surface == s)
+		g_active_surface = NULL;
+	if (s->default_vao)
+		glDeleteVertexArrays(1, &s->default_vao);
+	if (s->depth_stencil_rbo)
+		glDeleteRenderbuffers(1, &s->depth_stencil_rbo);
+	if (s->color_tex)
+		glDeleteTextures(1, &s->color_tex);
+	if (s->fbo)
+		glDeleteFramebuffers(1, &s->fbo);
+	free(s);
+}
+
+uint32_t lam_webgl_surface_tex(const lam_webgl_surface_t *s)
+{
+	return s ? (uint32_t)s->color_tex : 0u;
+}
+
+void lam_webgl_surface_size(const lam_webgl_surface_t *s, uint32_t *w, uint32_t *h)
+{
+	if (w) *w = s ? s->w : 0u;
+	if (h) *h = s ? s->h : 0u;
+}
+
+int lam_webgl_surface_read_rgba(const lam_webgl_surface_t *s,
+                                uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                void *out_rgba)
+{
+	if (!s || !out_rgba || !w || !h)
+		return 0;
+	if (x + w > s->w || y + h > s->h)
+		return 0;
+
+	GLint prev_fbo = 0, prev_pack = 4;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);
+	glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+	glReadBuffer(GL_COLOR_ATTACHMENT0);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	glReadPixels((GLint)x, (GLint)y, (GLsizei)w, (GLsizei)h,
+	             GL_RGBA, GL_UNSIGNED_BYTE, out_rgba);
+
+	glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
+	return 1;
+}
+
+void lam_webgl_begin(lam_webgl_surface_t *s)
+{
+	if (!s)
+		return;
+
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &g_saved_state.fbo);
+	glGetIntegerv(GL_VIEWPORT, g_saved_state.viewport);
+	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &g_saved_state.vao);
+	glGetIntegerv(GL_CURRENT_PROGRAM, &g_saved_state.prog);
+	glGetIntegerv(GL_ACTIVE_TEXTURE, &g_saved_state.active_tex);
+	glGetIntegerv(GL_UNPACK_ALIGNMENT, &g_saved_state.unpack_align);
+	g_saved_state.depth_test   = glIsEnabled(GL_DEPTH_TEST);
+	g_saved_state.blend        = glIsEnabled(GL_BLEND);
+	g_saved_state.cull_face    = glIsEnabled(GL_CULL_FACE);
+	g_saved_state.stencil_test = glIsEnabled(GL_STENCIL_TEST);
+	g_saved_state.scissor_test = glIsEnabled(GL_SCISSOR_TEST);
+	g_saved_state.poly_offset  = glIsEnabled(GL_POLYGON_OFFSET_FILL);
+
+	g_active_surface = s;
+	glDisable(GL_SCISSOR_TEST);
+	glBindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+	glBindVertexArray(s->default_vao);
+	glViewport(0, 0, (GLsizei)s->w, (GLsizei)s->h);
+}
+
+void lam_webgl_end(void)
+{
+	if (!g_active_surface)
+		return;
+
+	g_active_surface = NULL;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)g_saved_state.fbo);
+	glViewport(g_saved_state.viewport[0], g_saved_state.viewport[1],
+	           g_saved_state.viewport[2], g_saved_state.viewport[3]);
+	glBindVertexArray((GLuint)g_saved_state.vao);
+	glUseProgram((GLuint)g_saved_state.prog);
+	glActiveTexture((GLenum)g_saved_state.active_tex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, g_saved_state.unpack_align);
+
+	if (g_saved_state.depth_test) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+	if (g_saved_state.blend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+	if (g_saved_state.cull_face) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+	if (g_saved_state.stencil_test) glEnable(GL_STENCIL_TEST); else glDisable(GL_STENCIL_TEST);
+	if (g_saved_state.scissor_test) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+	if (g_saved_state.poly_offset) glEnable(GL_POLYGON_OFFSET_FILL); else glDisable(GL_POLYGON_OFFSET_FILL);
+
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask(GL_TRUE);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+/* -------------------------------------------------------------------------
+ * GLSL ES 3.00 -> Desktop GLSL 330 core line-preserving translator
+ * ------------------------------------------------------------------------- */
+
+static char *translate_es300_to_gl330(const char *src, size_t len)
+{
+	/* Output is at most len + 32 bytes (330 core is 2 chars longer than 300 es). */
+	char *out = malloc(len + 64);
+	if (!out)
+		return NULL;
+
+	size_t i = 0, o = 0;
+	while (i < len) {
+		size_t line_start = i;
+		while (i < len && src[i] != '\n')
+			i++;
+		size_t line_end = i;
+		int has_nl = (i < len && src[i] == '\n');
+		if (has_nl)
+			i++;
+
+		size_t p = line_start;
+		while (p < line_end && (src[p] == ' ' || src[p] == '\t' || src[p] == '\r'))
+			p++;
+		size_t rem = line_end - p;
+
+		if (rem >= 15 && strncmp(src + p, "#version 300 es", 15) == 0) {
+			static const char repl[] = "#version 330 core";
+			memcpy(out + o, repl, sizeof(repl) - 1);
+			o += sizeof(repl) - 1;
+		} else if (rem >= 10 && strncmp(src + p, "precision ", 10) == 0) {
+			/* Strip ES precision qualifier line; keep newline for line parity */
+		} else {
+			size_t raw_len = line_end - line_start;
+			memcpy(out + o, src + line_start, raw_len);
+			o += raw_len;
+		}
+
+		if (has_nl)
+			out[o++] = '\n';
+	}
+	out[o] = '\0';
+	return out;
+}
+
+static const char *copy_slice_z(const char *name, size_t len,
+                                char *stack_buf, size_t stack_sz,
+                                char **heap_out)
+{
+	*heap_out = NULL;
+	if (len < stack_sz) {
+		memcpy(stack_buf, name, len);
+		stack_buf[len] = '\0';
+		return stack_buf;
+	}
+	char *h = malloc(len + 1);
+	if (!h)
+		return "";
+	memcpy(h, name, len);
+	h[len] = '\0';
+	*heap_out = h;
+	return h;
+}
+
+/* -------------------------------------------------------------------------
+ * 63 WebGL2 HAL functions (lam_gl*)
+ * ------------------------------------------------------------------------- */
+
+void lam_glViewport(GLint x, GLint y, GLsizei width, GLsizei height)
+{
+	glViewport(x, y, width, height);
+}
+
+void lam_glClearColor(GLclampf r, GLclampf g, GLclampf b, GLclampf a)
+{
+	glClearColor(r, g, b, a);
+}
+
+void lam_glClear(GLenum mask)
+{
+	glClear((GLbitfield)mask);
+}
+
+void lam_glEnable(GLenum cap)
+{
+	glEnable(cap);
+}
+
+void lam_glDisable(GLenum cap)
+{
+	glDisable(cap);
+}
+
+void lam_glDepthFunc(GLenum func)
+{
+	glDepthFunc(func);
+}
+
+void lam_glDepthMask(GLboolean flag)
+{
+	glDepthMask(flag);
+}
+
+void lam_glBlendFunc(GLenum sfactor, GLenum dfactor)
+{
+	glBlendFunc(sfactor, dfactor);
+}
+
+void lam_glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
+{
+	glColorMask(r, g, b, a);
+}
+
+void lam_glPolygonOffset(GLfloat factor, GLfloat units)
+{
+	glPolygonOffset(factor, units);
+}
+
+GLuint lam_glCreateShader(GLenum type)
+{
+	return glCreateShader(type);
+}
+
+void lam_glShaderSource(GLuint shader, const char *src, size_t len)
+{
+	if (!src || len == 0)
+		return;
+	char *translated = translate_es300_to_gl330(src, len);
+	if (!translated)
+		return;
+	const char *ptrs[1] = { translated };
+	glShaderSource(shader, 1, ptrs, NULL);
+	free(translated);
+}
+
+void lam_glCompileShader(GLuint shader)
+{
+	glCompileShader(shader);
+	GLint ok = 0;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+	if (!ok) {
+		char log[2048];
+		GLsizei n = 0;
+		glGetShaderInfoLog(shader, (GLsizei)sizeof(log) - 1, &n, log);
+		log[n] = '\0';
+		fprintf(stderr, "lam_webgl: shader %u compile error:\n%s\n",
+		        (unsigned)shader, log);
+	}
+}
+
+GLint lam_glGetShaderParameter(GLuint shader, GLenum pname)
+{
+	GLint val = 0;
+	glGetShaderiv(shader, pname, &val);
+	return val;
+}
+
+GLuint lam_glCreateProgram(void)
+{
+	return glCreateProgram();
+}
+
+void lam_glAttachShader(GLuint program, GLuint shader)
+{
+	glAttachShader(program, shader);
+}
+
+void lam_glLinkProgram(GLuint program)
+{
+	glLinkProgram(program);
+	GLint ok = 0;
+	glGetProgramiv(program, GL_LINK_STATUS, &ok);
+	if (!ok) {
+		char log[2048];
+		GLsizei n = 0;
+		glGetProgramInfoLog(program, (GLsizei)sizeof(log) - 1, &n, log);
+		log[n] = '\0';
+		fprintf(stderr, "lam_webgl: program %u link error:\n%s\n",
+		        (unsigned)program, log);
+	}
+}
+
+GLint lam_glGetProgramParameter(GLuint program, GLenum pname)
+{
+	if (pname == GL_COMPLETION_STATUS_KHR)
+		return 1;
+	GLint val = 0;
+	glGetProgramiv(program, pname, &val);
+	return val;
+}
+
+void lam_glUseProgram(GLuint program)
+{
+	glUseProgram(program);
+}
+
+GLuint lam_glCreateBuffer(void)
+{
+	GLuint id = 0;
+	glGenBuffers(1, &id);
+	return id;
+}
+
+void lam_glBindBuffer(GLenum target, GLuint buffer)
+{
+	glBindBuffer(target, buffer);
+}
+
+void lam_glBufferData(GLenum target, const void *data, size_t size, GLenum usage)
+{
+	glBufferData(target, (GLsizeiptr)size, data, usage);
+}
+
+GLuint lam_glCreateTexture(void)
+{
+	GLuint id = 0;
+	glGenTextures(1, &id);
+	return id;
+}
+
+void lam_glDeleteTexture(GLuint texture)
+{
+	if (texture)
+		glDeleteTextures(1, &texture);
+}
+
+void lam_glBindTexture(GLenum target, GLuint texture)
+{
+	glBindTexture(target, texture);
+}
+
+void lam_glActiveTexture(GLenum texture)
+{
+	glActiveTexture(texture);
+}
+
+void lam_glTexParameteri(GLenum target, GLenum pname, GLint param)
+{
+	glTexParameteri(target, pname, param);
+}
+
+void lam_glPixelStorei(GLenum pname, GLint param)
+{
+	glPixelStorei(pname, param);
+}
+
+void lam_glTexImage2D(GLenum target, GLint level, GLint internalformat,
+                      GLsizei width, GLsizei height, GLint border,
+                      GLenum format, GLenum type, const void *pixels)
+{
+	glTexImage2D(target, level, internalformat, width, height, border,
+	             format, type, pixels);
+}
+
+void lam_glTexSubImage2D(GLenum target, GLint level,
+                         GLint xoffset, GLint yoffset,
+                         GLsizei width, GLsizei height,
+                         GLenum format, GLenum type, const void *pixels)
+{
+	glTexSubImage2D(target, level, xoffset, yoffset, width, height,
+	                format, type, pixels);
+}
+
+void lam_glTexImage3D(GLenum target, GLint level, GLint internalformat,
+                      GLsizei width, GLsizei height, GLsizei depth,
+                      GLint border, GLenum format, GLenum type, const void *pixels)
+{
+	glTexImage3D(target, level, internalformat, width, height, depth,
+	             border, format, type, pixels);
+}
+
+void lam_glTexSubImage3D(GLenum target, GLint level,
+                         GLint xoffset, GLint yoffset, GLint zoffset,
+                         GLsizei width, GLsizei height, GLsizei depth,
+                         GLenum format, GLenum type, const void *pixels)
+{
+	glTexSubImage3D(target, level, xoffset, yoffset, zoffset,
+	                width, height, depth, format, type, pixels);
+}
+
+void lam_glEnableVertexAttribArray(GLuint index)
+{
+	glEnableVertexAttribArray(index);
+}
+
+void lam_glDisableVertexAttribArray(GLuint index)
+{
+	glDisableVertexAttribArray(index);
+}
+
+void lam_glVertexAttribPointer(GLuint index, GLint size, GLenum type,
+                               GLboolean normalized, GLsizei stride, size_t offset)
+{
+	glVertexAttribPointer(index, size, type, normalized, stride,
+	                      (const void *)(uintptr_t)offset);
+}
+
+void lam_glDrawArrays(GLenum mode, GLint first, GLsizei count)
+{
+	glDrawArrays(mode, first, count);
+}
+
+void lam_glDrawElements(GLenum mode, GLsizei count, GLenum type, size_t offset)
+{
+	glDrawElements(mode, count, type, (const void *)(uintptr_t)offset);
+}
+
+void lam_glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
+                                 size_t offset, GLsizei instancecount)
+{
+	glDrawElementsInstanced(mode, count, type,
+	                        (const void *)(uintptr_t)offset, instancecount);
+}
+
+void lam_glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
+                               GLsizei instancecount)
+{
+	glDrawArraysInstanced(mode, first, count, instancecount);
+}
+
+void lam_glVertexAttribDivisor(GLuint index, GLuint divisor)
+{
+	glVertexAttribDivisor(index, divisor);
+}
+
+GLint lam_glGetAttribLocation(GLuint program, const char *name, size_t len)
+{
+	char stack[256], *heap = NULL;
+	const char *z = copy_slice_z(name, len, stack, sizeof(stack), &heap);
+	GLint loc = glGetAttribLocation(program, z);
+	free(heap);
+	return loc;
+}
+
+void lam_glBindAttribLocation(GLuint program, GLuint index, const char *name, size_t len)
+{
+	char stack[256], *heap = NULL;
+	const char *z = copy_slice_z(name, len, stack, sizeof(stack), &heap);
+	glBindAttribLocation(program, index, z);
+	free(heap);
+}
+
+GLint lam_glGetUniformLocation(GLuint program, const char *name, size_t len)
+{
+	char stack[256], *heap = NULL;
+	const char *z = copy_slice_z(name, len, stack, sizeof(stack), &heap);
+	GLint loc = glGetUniformLocation(program, z);
+	free(heap);
+	return loc;
+}
+
+void lam_glUniform1i(GLint location, GLint v0)
+{
+	glUniform1i(location, v0);
+}
+
+void lam_glUniform1f(GLint location, GLfloat v0)
+{
+	glUniform1f(location, v0);
+}
+
+void lam_glUniform2f(GLint location, GLfloat v0, GLfloat v1)
+{
+	glUniform2f(location, v0, v1);
+}
+
+void lam_glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2)
+{
+	glUniform3f(location, v0, v1, v2);
+}
+
+void lam_glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)
+{
+	glUniform4f(location, v0, v1, v2, v3);
+}
+
+void lam_glUniform2fv(GLint location, GLsizei count, const GLfloat *value)
+{
+	glUniform2fv(location, count, value);
+}
+
+void lam_glUniform3fv(GLint location, GLsizei count, const GLfloat *value)
+{
+	glUniform3fv(location, count, value);
+}
+
+void lam_glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose,
+                            const GLfloat *value)
+{
+	glUniformMatrix4fv(location, count, transpose, value);
+}
+
+void lam_glDeleteShader(GLuint shader)
+{
+	glDeleteShader(shader);
+}
+
+void lam_glDeleteProgram(GLuint program)
+{
+	glDeleteProgram(program);
+}
+
+void lam_glDeleteBuffer(GLuint buffer)
+{
+	if (buffer)
+		glDeleteBuffers(1, &buffer);
+}
+
+GLuint lam_glCreateFramebuffer(void)
+{
+	GLuint id = 0;
+	glGenFramebuffers(1, &id);
+	return id;
+}
+
+void lam_glDeleteFramebuffer(GLuint fb)
+{
+	if (fb)
+		glDeleteFramebuffers(1, &fb);
+}
+
+void lam_glBindFramebuffer(GLenum target, GLuint fb)
+{
+	GLuint actual = (fb == 0 && g_active_surface) ? g_active_surface->fbo : fb;
+	glBindFramebuffer(target, actual);
+}
+
+void lam_glFramebufferTexture2D(GLenum target, GLenum attachment,
+                                GLenum textarget, GLuint tex, GLint level)
+{
+	glFramebufferTexture2D(target, attachment, textarget, tex, level);
+}
+
+void lam_glFramebufferRenderbuffer(GLenum target, GLenum attachment,
+                                   GLenum rbtarget, GLuint rb)
+{
+	glFramebufferRenderbuffer(target, attachment, rbtarget, rb);
+}
+
+GLenum lam_glCheckFramebufferStatus(GLenum target)
+{
+	return glCheckFramebufferStatus(target);
+}
+
+GLuint lam_glCreateRenderbuffer(void)
+{
+	GLuint id = 0;
+	glGenRenderbuffers(1, &id);
+	return id;
+}
+
+void lam_glDeleteRenderbuffer(GLuint rb)
+{
+	if (rb)
+		glDeleteRenderbuffers(1, &rb);
+}
+
+void lam_glBindRenderbuffer(GLenum target, GLuint rb)
+{
+	glBindRenderbuffer(target, rb);
+}
+
+void lam_glRenderbufferStorageMultisample(GLenum target, GLsizei samples,
+                                          GLenum internalformat,
+                                          GLsizei width, GLsizei height)
+{
+	if (samples <= 0) {
+		glRenderbufferStorage(target, internalformat, width, height);
+		return;
+	}
+	GLint max_samples = 4;
+	glGetIntegerv(GL_MAX_SAMPLES, &max_samples);
+	if (samples > max_samples)
+		samples = max_samples;
+	glRenderbufferStorageMultisample(target, samples, internalformat, width, height);
+}
+
+void lam_glStencilFunc(GLenum func, GLint ref, GLuint mask)
+{
+	glStencilFunc(func, ref, mask);
+}
+
+void lam_glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass)
+{
+	glStencilOp(sfail, dpfail, dppass);
+}
+
+void lam_glStencilMask(GLuint mask)
+{
+	glStencilMask(mask);
+}
+
+void lam_glClearStencil(GLint s)
+{
+	glClearStencil(s);
+}
+
+void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1,
+                           GLint dx0, GLint dy0, GLint dx1, GLint dy1,
+                           GLbitfield mask, GLenum filter)
+{
+	glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
+}
+
+/* -------------------------------------------------------------------------
+ * Native 2D software canvas flush -> GL texture (for <canvas> 2D viewports)
+ * ------------------------------------------------------------------------- */
+
+void lam_canvas_flush(const void *buf, uint32_t w, uint32_t h)
+{
+	if (!buf || !w || !h)
+		return;
+
+	GLint prev_tex = 0, prev_align = 4;
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+	glGetIntegerv(GL_UNPACK_ALIGNMENT, &prev_align);
+
+	if (!g_canvas_tex) {
+		glGenTextures(1, &g_canvas_tex);
+		glBindTexture(GL_TEXTURE_2D, g_canvas_tex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	} else {
+		glBindTexture(GL_TEXTURE_2D, g_canvas_tex);
+	}
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	if (w != g_canvas_w || h != g_canvas_h) {
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0,
+		             GL_RGBA, GL_UNSIGNED_BYTE, buf);
+		g_canvas_w = w;
+		g_canvas_h = h;
+	} else {
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)w, (GLsizei)h,
+		                GL_RGBA, GL_UNSIGNED_BYTE, buf);
+	}
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, prev_align);
+	glBindTexture(GL_TEXTURE_2D, (GLuint)prev_tex);
+}
+
+uint32_t lam_canvas_gl_tex(uint32_t *out_w, uint32_t *out_h)
+{
+	if (out_w) *out_w = g_canvas_w;
+	if (out_h) *out_h = g_canvas_h;
+	return (uint32_t)g_canvas_tex;
+}

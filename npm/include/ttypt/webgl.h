@@ -90,6 +90,8 @@ typedef unsigned int GLbitfield;
 #define GL_DEPTH_ATTACHMENT       0x8D00
 #define GL_FRAMEBUFFER_COMPLETE   0x8CD5
 #define GL_RGBA8                  0x8058
+#define GL_RGBA16F                0x881A
+#define GL_HALF_FLOAT             0x140B
 #define GL_R8                     0x8229
 #define GL_RED                    0x1903
 #define GL_DEPTH_COMPONENT        0x1902
@@ -324,6 +326,181 @@ void glClearStencil(GLint s);
 
 __attribute__((import_module("webgl"), import_name("glBlitFramebuffer")))
 void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter);
+
+#elif defined(LAM_WEBGL_NATIVE)
+
+typedef struct lam_webgl_surface lam_webgl_surface_t;
+
+lam_webgl_surface_t *lam_webgl_surface_create(uint32_t w, uint32_t h);
+void lam_webgl_surface_resize(lam_webgl_surface_t *s, uint32_t w, uint32_t h);
+void lam_webgl_surface_destroy(lam_webgl_surface_t *s);
+uint32_t lam_webgl_surface_tex(const lam_webgl_surface_t *s);
+void lam_webgl_surface_size(const lam_webgl_surface_t *s, uint32_t *w, uint32_t *h);
+int lam_webgl_surface_read_rgba(const lam_webgl_surface_t *s,
+                                uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                void *out_rgba);
+void lam_webgl_begin(lam_webgl_surface_t *s);
+void lam_webgl_end(void);
+
+void lam_glViewport(GLint x, GLint y, GLsizei width, GLsizei height);
+void lam_glClearColor(GLclampf r, GLclampf g, GLclampf b, GLclampf a);
+void lam_glClear(GLenum mask);
+void lam_glEnable(GLenum cap);
+void lam_glDisable(GLenum cap);
+void lam_glDepthFunc(GLenum func);
+void lam_glDepthMask(GLboolean flag);
+void lam_glBlendFunc(GLenum sfactor, GLenum dfactor);
+void lam_glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a);
+void lam_glPolygonOffset(GLfloat factor, GLfloat units);
+GLuint lam_glCreateShader(GLenum type);
+void lam_glShaderSource(GLuint shader, const char *src, size_t len);
+void lam_glCompileShader(GLuint shader);
+GLint lam_glGetShaderParameter(GLuint shader, GLenum pname);
+GLuint lam_glCreateProgram(void);
+void lam_glAttachShader(GLuint program, GLuint shader);
+void lam_glLinkProgram(GLuint program);
+GLint lam_glGetProgramParameter(GLuint program, GLenum pname);
+void lam_glUseProgram(GLuint program);
+GLuint lam_glCreateBuffer(void);
+void lam_glBindBuffer(GLenum target, GLuint buffer);
+void lam_glBufferData(GLenum target, const void *data, size_t size, GLenum usage);
+GLuint lam_glCreateTexture(void);
+void lam_glDeleteTexture(GLuint texture);
+void lam_glBindTexture(GLenum target, GLuint texture);
+void lam_glActiveTexture(GLenum texture);
+void lam_glTexParameteri(GLenum target, GLenum pname, GLint param);
+void lam_glPixelStorei(GLenum pname, GLint param);
+void lam_glTexImage2D(GLenum target, GLint level, GLint internalformat,
+                      GLsizei width, GLsizei height, GLint border,
+                      GLenum format, GLenum type, const void *pixels);
+void lam_glTexSubImage2D(GLenum target, GLint level,
+                         GLint xoffset, GLint yoffset,
+                         GLsizei width, GLsizei height,
+                         GLenum format, GLenum type, const void *pixels);
+void lam_glTexImage3D(GLenum target, GLint level, GLint internalformat,
+                      GLsizei width, GLsizei height, GLsizei depth,
+                      GLint border, GLenum format, GLenum type, const void *pixels);
+void lam_glTexSubImage3D(GLenum target, GLint level,
+                         GLint xoffset, GLint yoffset, GLint zoffset,
+                         GLsizei width, GLsizei height, GLsizei depth,
+                         GLenum format, GLenum type, const void *pixels);
+void lam_glEnableVertexAttribArray(GLuint index);
+void lam_glDisableVertexAttribArray(GLuint index);
+void lam_glVertexAttribPointer(GLuint index, GLint size, GLenum type,
+                               GLboolean normalized, GLsizei stride, size_t offset);
+void lam_glDrawArrays(GLenum mode, GLint first, GLsizei count);
+void lam_glDrawElements(GLenum mode, GLsizei count, GLenum type, size_t offset);
+void lam_glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type,
+                                 size_t offset, GLsizei instancecount);
+void lam_glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
+                               GLsizei instancecount);
+void lam_glVertexAttribDivisor(GLuint index, GLuint divisor);
+GLint lam_glGetAttribLocation(GLuint program, const char *name, size_t len);
+void lam_glBindAttribLocation(GLuint program, GLuint index, const char *name, size_t len);
+GLint lam_glGetUniformLocation(GLuint program, const char *name, size_t len);
+void lam_glUniform1i(GLint location, GLint v0);
+void lam_glUniform1f(GLint location, GLfloat v0);
+void lam_glUniform2f(GLint location, GLfloat v0, GLfloat v1);
+void lam_glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
+void lam_glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
+void lam_glUniform2fv(GLint location, GLsizei count, const GLfloat *value);
+void lam_glUniform3fv(GLint location, GLsizei count, const GLfloat *value);
+void lam_glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose,
+                            const GLfloat *value);
+void lam_glDeleteShader(GLuint shader);
+void lam_glDeleteProgram(GLuint program);
+void lam_glDeleteBuffer(GLuint buffer);
+GLuint lam_glCreateFramebuffer(void);
+void lam_glDeleteFramebuffer(GLuint fb);
+void lam_glBindFramebuffer(GLenum target, GLuint fb);
+void lam_glFramebufferTexture2D(GLenum target, GLenum attachment,
+                                GLenum textarget, GLuint tex, GLint level);
+void lam_glFramebufferRenderbuffer(GLenum target, GLenum attachment,
+                                   GLenum rbtarget, GLuint rb);
+GLenum lam_glCheckFramebufferStatus(GLenum target);
+GLuint lam_glCreateRenderbuffer(void);
+void lam_glDeleteRenderbuffer(GLuint rb);
+void lam_glBindRenderbuffer(GLenum target, GLuint rb);
+void lam_glRenderbufferStorageMultisample(GLenum target, GLsizei samples,
+                                          GLenum internalformat,
+                                          GLsizei width, GLsizei height);
+void lam_glStencilFunc(GLenum func, GLint ref, GLuint mask);
+void lam_glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass);
+void lam_glStencilMask(GLuint mask);
+void lam_glClearStencil(GLint s);
+void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1,
+                           GLint dx0, GLint dy0, GLint dx1, GLint dy1,
+                           GLbitfield mask, GLenum filter);
+
+#define glViewport                       lam_glViewport
+#define glClearColor                     lam_glClearColor
+#define glClear                          lam_glClear
+#define glEnable                         lam_glEnable
+#define glDisable                        lam_glDisable
+#define glDepthFunc                      lam_glDepthFunc
+#define glDepthMask                      lam_glDepthMask
+#define glBlendFunc                      lam_glBlendFunc
+#define glColorMask                      lam_glColorMask
+#define glPolygonOffset                  lam_glPolygonOffset
+#define glCreateShader                   lam_glCreateShader
+#define glShaderSource                   lam_glShaderSource
+#define glCompileShader                  lam_glCompileShader
+#define glGetShaderParameter             lam_glGetShaderParameter
+#define glCreateProgram                  lam_glCreateProgram
+#define glAttachShader                   lam_glAttachShader
+#define glLinkProgram                    lam_glLinkProgram
+#define glGetProgramParameter            lam_glGetProgramParameter
+#define glUseProgram                     lam_glUseProgram
+#define glCreateBuffer                   lam_glCreateBuffer
+#define glBindBuffer                     lam_glBindBuffer
+#define glBufferData                     lam_glBufferData
+#define glCreateTexture                  lam_glCreateTexture
+#define glDeleteTexture                  lam_glDeleteTexture
+#define glBindTexture                    lam_glBindTexture
+#define glActiveTexture                  lam_glActiveTexture
+#define glTexParameteri                  lam_glTexParameteri
+#define glPixelStorei                    lam_glPixelStorei
+#define glTexImage2D                     lam_glTexImage2D
+#define glTexSubImage2D                  lam_glTexSubImage2D
+#define glTexImage3D                     lam_glTexImage3D
+#define glTexSubImage3D                  lam_glTexSubImage3D
+#define glEnableVertexAttribArray        lam_glEnableVertexAttribArray
+#define glDisableVertexAttribArray       lam_glDisableVertexAttribArray
+#define glVertexAttribPointer            lam_glVertexAttribPointer
+#define glDrawArrays                     lam_glDrawArrays
+#define glDrawElements                   lam_glDrawElements
+#define glDrawElementsInstanced          lam_glDrawElementsInstanced
+#define glDrawArraysInstanced            lam_glDrawArraysInstanced
+#define glVertexAttribDivisor            lam_glVertexAttribDivisor
+#define glGetAttribLocation              lam_glGetAttribLocation
+#define glBindAttribLocation             lam_glBindAttribLocation
+#define glGetUniformLocation             lam_glGetUniformLocation
+#define glUniform1i                      lam_glUniform1i
+#define glUniform1f                      lam_glUniform1f
+#define glUniform2f                      lam_glUniform2f
+#define glUniform3f                      lam_glUniform3f
+#define glUniform4f                      lam_glUniform4f
+#define glUniform2fv                     lam_glUniform2fv
+#define glUniform3fv                     lam_glUniform3fv
+#define glUniformMatrix4fv               lam_glUniformMatrix4fv
+#define glDeleteShader                   lam_glDeleteShader
+#define glDeleteProgram                  lam_glDeleteProgram
+#define glDeleteBuffer                   lam_glDeleteBuffer
+#define glCreateFramebuffer              lam_glCreateFramebuffer
+#define glDeleteFramebuffer              lam_glDeleteFramebuffer
+#define glBindFramebuffer                lam_glBindFramebuffer
+#define glFramebufferTexture2D           lam_glFramebufferTexture2D
+#define glFramebufferRenderbuffer        lam_glFramebufferRenderbuffer
+#define glCheckFramebufferStatus         lam_glCheckFramebufferStatus
+#define glCreateRenderbuffer             lam_glCreateRenderbuffer
+#define glDeleteRenderbuffer             lam_glDeleteRenderbuffer
+#define glBindRenderbuffer               lam_glBindRenderbuffer
+#define glRenderbufferStorageMultisample lam_glRenderbufferStorageMultisample
+#define glStencilFunc                    lam_glStencilFunc
+#define glStencilOp                      lam_glStencilOp
+#define glStencilMask                    lam_glStencilMask
+#define glClearStencil                   lam_glClearStencil
+#define glBlitFramebuffer                lam_glBlitFramebuffer
 
 #else
 
