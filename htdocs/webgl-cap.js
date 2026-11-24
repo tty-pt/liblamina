@@ -8,9 +8,11 @@
  * worker or UI interaction.
  */
 
+const TEXT_DECODER = new TextDecoder();
+
 function readStr(memory, ptr, len) {
 	if (!memory || !ptr || len <= 0) return '';
-	return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr >>> 0, len >>> 0));
+	return TEXT_DECODER.decode(new Uint8Array(memory.buffer, ptr >>> 0, len >>> 0));
 }
 
 function getExport(exports, names) {
@@ -138,6 +140,43 @@ export function createWebGlBridge(root, getWasm) {
 	let shaderWorkerUnavailable = false;
 	let compileRevCounter = 1;
 
+	/* Optional runtime bridge profiler (disabled by default; zero allocations in hot path) */
+	let perfEnabled = !!(globalScope && globalScope.__webglPerfEnabled);
+	const perfStats = {
+		getGlCalls: 0,
+		domQueries: 0,
+		getUniformLocationCalls: 0,
+		uniformUploads: 0,
+		texUploads: 0,
+		bufferUploads: 0,
+		draws: 0,
+		blits: 0
+	};
+	const perfApi = {
+		enable(v) { perfEnabled = !!v; },
+		isEnabled() { return perfEnabled; },
+		reset() {
+			perfStats.getGlCalls = 0;
+			perfStats.domQueries = 0;
+			perfStats.getUniformLocationCalls = 0;
+			perfStats.uniformUploads = 0;
+			perfStats.texUploads = 0;
+			perfStats.bufferUploads = 0;
+			perfStats.draws = 0;
+			perfStats.blits = 0;
+		},
+		snapshot() {
+			return {
+				enabled: perfEnabled,
+				...perfStats,
+				uniformLocsLen: uniformLocs.length - 1,
+				programsLen: programs.length - 1,
+				texturesLen: textures.length - 1
+			};
+		}
+	};
+	if (globalScope) globalScope.__webglBridgePerf = perfApi;
+
 	function attachShaderOnce(c, p, s, sid) {
 		if (!c || !p || !s) return;
 		let set = attachedShadersByProgram.get(p);
@@ -215,6 +254,7 @@ export function createWebGlBridge(root, getWasm) {
 	}
 
 	function findCanvas() {
+		if (perfEnabled) perfStats.domQueries++;
 		const scope = (root && root.querySelector) ? root : (typeof document !== 'undefined' ? document : null);
 		if (scope) {
 			let c = scope.querySelector('[data-bud-webgl]') ||
@@ -455,16 +495,44 @@ export function createWebGlBridge(root, getWasm) {
 		}
 	}
 
-	function getGl() {
+	let isWebGL2 = false;
+	let workerCanvasesGen = -1;
+	let cachedBuf = null;
+	let memU8 = null;
+	let memI16 = null;
+	let memF32 = null;
+
+	function ensureMemViews(memory) {
+		const buf = memory.buffer;
+		if (buf !== cachedBuf) {
+			cachedBuf = buf;
+			memU8 = new Uint8Array(buf);
+			memI16 = new Int16Array(buf);
+			memF32 = new Float32Array(buf);
+		}
+	}
+
+	function getGl(forceCheck) {
+		if (perfEnabled) perfStats.getGlCalls++;
+		const curWGen = globalScope.__stele_worker_canvases_gen || 0;
+		if (!forceCheck && gl && glCanvas && glCanvas !== fallbackOffscreen &&
+		    glCanvas.isConnected !== false && curWGen === workerCanvasesGen) {
+			return gl;
+		}
+		workerCanvasesGen = curWGen;
 		const canvas = findCanvas();
 		if (gl && glCanvas && glCanvas.isConnected !== false && (!canvas || canvas === glCanvas)) return gl;
 		if (canvas) {
 			const prevCanvas = glCanvas;
 			/* Default framebuffer is single-sampled: scenes antialias in their own multisampled FBO and resolve-blit into it
-			 * (glBlitFramebuffer into a multisampled draw framebuffer is INVALID_OPERATION). */
-			const glOpts = { preserveDrawingBuffer: true, alpha: true, antialias: false, depth: true };
+			 * (glBlitFramebuffer into a multisampled draw framebuffer is INVALID_OPERATION).
+			 * Keep preserveDrawingBuffer off in normal browsers to avoid a full-screen compositor copy per frame;
+			 * enable under webdriver/explicit flag so headless screenshot/readPixels capture keeps working. */
+			const preserveBuf = !!(globalScope && (globalScope.__webglPreserveDrawingBuffer || (globalScope.navigator && globalScope.navigator.webdriver)));
+			const glOpts = { preserveDrawingBuffer: preserveBuf, alpha: true, antialias: false, depth: true };
 			gl = canvas.getContext('webgl2', glOpts) || canvas.getContext('webgl', glOpts);
 			glCanvas = canvas;
+			isWebGL2 = !!(gl && typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext);
 			parallelCompileExt = (gl && typeof gl.getExtension === 'function')
 				? gl.getExtension('KHR_parallel_shader_compile')
 				: null;
@@ -505,12 +573,19 @@ export function createWebGlBridge(root, getWasm) {
 	}
 
 	return {
+		perf: perfApi,
 		mount() {
-			getGl();
+			getGl(true);
 		},
 		destroy() {
 			gl = null;
 			glCanvas = null;
+			isWebGL2 = false;
+			workerCanvasesGen = -1;
+			cachedBuf = null;
+			memU8 = null;
+			memI16 = null;
+			memF32 = null;
 			parallelCompileExt = undefined;
 			anisoExt = null;
 			maxAniso = 1;
@@ -791,6 +866,7 @@ export function createWebGlBridge(root, getWasm) {
 					if (c) c.bindBuffer(target, b || null);
 				},
 				glBufferData(target, dataPtr, size, usage) {
+					if (perfEnabled) perfStats.bufferUploads++;
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory) return;
@@ -874,6 +950,7 @@ export function createWebGlBridge(root, getWasm) {
 					if (c) c.pixelStorei(pname, param);
 				},
 				glTexImage2D(target, level, internalformat, width, height, border, format, type, pixelsPtr) {
+					if (perfEnabled) perfStats.texUploads++;
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory) return;
@@ -944,6 +1021,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixelsPtr) {
+					if (perfEnabled) perfStats.texUploads++;
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory || !pixelsPtr) return;
@@ -953,8 +1031,11 @@ export function createWebGlBridge(root, getWasm) {
 					const boundId = getBoundTextureId(target);
 					const tm = boundId ? textureMeta[boundId] : null;
 					const m = (tm && tm.mips) ? tm.mips[lvl] : null;
+					ensureMemViews(exports.memory);
 					if (type === 0x1402) {
-						const view = new Int16Array(exports.memory.buffer, ptr, count);
+						const view = ((ptr & 1) === 0)
+							? memI16.subarray(ptr >>> 1, (ptr >>> 1) + count)
+							: new Int16Array(exports.memory.buffer.slice(ptr, ptr + count * 2));
 						if (m && m.pixels && xoffset === 0 && width === m.width && yoffset >= 0 && yoffset + height <= m.height) {
 							m.pixels.set(view, yoffset * m.width);
 						}
@@ -962,7 +1043,7 @@ export function createWebGlBridge(root, getWasm) {
 					} else {
 						const bpp = (format === 0x1903 || format === 0x8D94) ? 1 : (format === 0x1907 ? 3 : 4);
 						const byteLen = count * bpp;
-						const view = new Uint8Array(exports.memory.buffer, ptr, byteLen);
+						const view = memU8.subarray(ptr, ptr + byteLen);
 						if (m && m.pixels && xoffset === 0 && width === m.width && yoffset >= 0 && yoffset + height <= m.height) {
 							m.pixels.set(view, yoffset * m.width * bpp);
 						}
@@ -970,6 +1051,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, pixels) {
+					if (perfEnabled) perfStats.texUploads++;
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || typeof c.texImage3D !== 'function') return;
@@ -992,6 +1074,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels) {
+					if (perfEnabled) perfStats.texUploads++;
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || typeof c.texSubImage3D !== 'function' || !exports || !exports.memory || !pixels) return;
@@ -1022,6 +1105,7 @@ export function createWebGlBridge(root, getWasm) {
 					if (c) c.vertexAttribPointer(index, size, type, !!normalized, stride, offset >>> 0);
 				},
 				glDrawArrays(mode, first, count) {
+					if (perfEnabled) perfStats.draws++;
 					const c = getGl();
 					if (c) {
 						c.drawArrays(mode, first, count);
@@ -1029,6 +1113,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glDrawElements(mode, count, type, offset) {
+					if (perfEnabled) perfStats.draws++;
 					const c = getGl();
 					if (c) {
 						c.drawElements(mode, count, type, offset >>> 0);
@@ -1036,6 +1121,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glDrawElementsInstanced(mode, count, type, offset, instanceCount) {
+					if (perfEnabled) perfStats.draws++;
 					const c = getGl();
 					if (c && typeof c.drawElementsInstanced === 'function') {
 						c.drawElementsInstanced(mode, count, type, offset >>> 0, instanceCount);
@@ -1043,6 +1129,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glDrawArraysInstanced(mode, first, count, instanceCount) {
+					if (perfEnabled) perfStats.draws++;
 					const c = getGl();
 					if (c) {
 						c.drawArraysInstanced(mode, first, count, instanceCount);
@@ -1072,6 +1159,7 @@ export function createWebGlBridge(root, getWasm) {
 					if (p) c.bindAttribLocation(p, index, name);
 				},
 				glGetUniformLocation(programId, namePtr, nameLen) {
+					if (perfEnabled) perfStats.getUniformLocationCalls++;
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory) return -1;
@@ -1085,53 +1173,97 @@ export function createWebGlBridge(root, getWasm) {
 					return uniformLocs.length - 1;
 				},
 				glUniform1i(locId, v0) {
+					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform1i(loc, v0);
 				},
 				glUniform1f(locId, v0) {
+					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform1f(loc, v0);
 				},
 				glUniform2f(locId, v0, v1) {
+					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform2f(loc, v0, v1);
 				},
 				glUniform3f(locId, v0, v1, v2) {
+					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform3f(loc, v0, v1, v2);
 				},
 				glUniform4f(locId, v0, v1, v2, v3) {
+					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform4f(loc, v0, v1, v2, v3);
 				},
 				glUniform2fv(locId, count, valPtr) {
+					if (perfEnabled) perfStats.uniformUploads++;
+					if (count <= 0) return;
 					const c = getGl();
 					const exports = getWasm();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (!c || !loc || !exports || !exports.memory) return;
-					const floats = new Float32Array(exports.memory.buffer, valPtr >>> 0, count * 2);
-					c.uniform2fv(loc, floats);
+					const ptr = valPtr >>> 0;
+					const len = count * 2;
+					if ((ptr & 3) === 0) {
+						ensureMemViews(exports.memory);
+						const off = ptr >>> 2;
+						if (isWebGL2) {
+							c.uniform2fv(loc, memF32, off, len);
+						} else {
+							c.uniform2fv(loc, memF32.subarray(off, off + len));
+						}
+					} else {
+						c.uniform2fv(loc, new Float32Array(exports.memory.buffer, ptr, len));
+					}
 				},
 				glUniform3fv(locId, count, valPtr) {
+					if (perfEnabled) perfStats.uniformUploads++;
+					if (count <= 0) return;
 					const c = getGl();
 					const exports = getWasm();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (!c || !loc || !exports || !exports.memory) return;
-					const floats = new Float32Array(exports.memory.buffer, valPtr >>> 0, count * 3);
-					c.uniform3fv(loc, floats);
+					const ptr = valPtr >>> 0;
+					const len = count * 3;
+					if ((ptr & 3) === 0) {
+						ensureMemViews(exports.memory);
+						const off = ptr >>> 2;
+						if (isWebGL2) {
+							c.uniform3fv(loc, memF32, off, len);
+						} else {
+							c.uniform3fv(loc, memF32.subarray(off, off + len));
+						}
+					} else {
+						c.uniform3fv(loc, new Float32Array(exports.memory.buffer, ptr, len));
+					}
 				},
 				glUniformMatrix4fv(locId, count, trans, valPtr) {
+					if (perfEnabled) perfStats.uniformUploads++;
+					if (count <= 0) return;
 					const c = getGl();
 					const exports = getWasm();
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (!c || !loc || !exports || !exports.memory) return;
-					const floats = new Float32Array(exports.memory.buffer, valPtr >>> 0, count * 16);
-					c.uniformMatrix4fv(loc, !!trans, floats);
+					const ptr = valPtr >>> 0;
+					const len = count * 16;
+					if ((ptr & 3) === 0) {
+						ensureMemViews(exports.memory);
+						const off = ptr >>> 2;
+						if (isWebGL2) {
+							c.uniformMatrix4fv(loc, !!trans, memF32, off, len);
+						} else {
+							c.uniformMatrix4fv(loc, !!trans, memF32.subarray(off, off + len));
+						}
+					} else {
+						c.uniformMatrix4fv(loc, !!trans, new Float32Array(exports.memory.buffer, ptr, len));
+					}
 				},
 				glDeleteShader(shaderId) {
 					const c = getGl();
@@ -1224,6 +1356,7 @@ export function createWebGlBridge(root, getWasm) {
 					}
 				},
 				glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter) {
+					if (perfEnabled) perfStats.blits++;
 					const c = getGl();
 					if (c && typeof c.blitFramebuffer === 'function') {
 						c.blitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
