@@ -135,7 +135,6 @@ export function createWebGlBridge(root, getWasm) {
 	const uniformMeta = [null];
 	const globalScope = typeof window !== 'undefined' ? window : globalThis;
 
-	let fallbackOffscreen = null;
 	let shaderWorker = null;
 	let shaderWorkerUnavailable = false;
 	let compileRevCounter = 1;
@@ -255,14 +254,16 @@ export function createWebGlBridge(root, getWasm) {
 		c.attachShader(p, s);
 	}
 
-	function refreshUniformLocsForProgram(c, programId) {
+	function refreshUniformLocsForProgram(c, programId, restoreCurrent = true) {
 		const p = programs[programId];
 		const pm = programMeta[programId];
 		if (!c || !p || !pm || !pm.localLinkedInitiated) return;
+		let hasReplay = false;
 		for (let i = 1; i < uniformMeta.length; i++) {
 			const um = uniformMeta[i];
 			if (um && um.programId === programId) {
 				uniformLocs[i] = c.getUniformLocation(p, um.name);
+				if (um.kind !== 0 && uniformLocs[i]) hasReplay = true;
 			}
 		}
 		if (pm.uboBindings && pm.uboBindings.length > 0 && typeof c.getUniformBlockIndex === 'function' && typeof c.uniformBlockBinding === 'function') {
@@ -271,6 +272,28 @@ export function createWebGlBridge(root, getWasm) {
 				if (idx !== 0xFFFFFFFF && idx !== undefined) {
 					c.uniformBlockBinding(p, idx, binding);
 				}
+			}
+		}
+		if (hasReplay && (!pm.localReady || pm.localLinkedOk)) {
+			c.useProgram(p);
+			for (let i = 1; i < uniformMeta.length; i++) {
+				const um = uniformMeta[i];
+				if (!um || um.programId !== programId || um.kind === 0) continue;
+				const loc = uniformLocs[i];
+				if (!loc) continue;
+				switch (um.kind) {
+				case 1: c.uniform1i(loc, um.v0); break;
+				case 2: c.uniform1f(loc, um.v0); break;
+				case 3: c.uniform2f(loc, um.v0, um.v1); break;
+				case 4: c.uniform3f(loc, um.v0, um.v1, um.v2); break;
+				case 5: c.uniform4f(loc, um.v0, um.v1, um.v2, um.v3); break;
+				default: break;
+				}
+			}
+			if (restoreCurrent) {
+				const curP = currentProgramId > 0 ? programs[currentProgramId] : null;
+				const curPm = currentProgramId > 0 ? programMeta[currentProgramId] : null;
+				c.useProgram((curP && curPm && curPm.localLinkedInitiated && (!curPm.localReady || curPm.localLinkedOk)) ? curP : null);
 			}
 		}
 	}
@@ -350,14 +373,7 @@ export function createWebGlBridge(root, getWasm) {
 				if (!webglMatch && entry.webgl) webglMatch = entry.canvas;
 				if (!fitMatch && entry.fit) fitMatch = entry.canvas;
 			}
-			if (webglMatch || fitMatch) return webglMatch || fitMatch;
-			if (typeof OffscreenCanvas !== 'undefined') {
-				if (!fallbackOffscreen) {
-					fallbackOffscreen = new OffscreenCanvas(640, 480);
-					fallbackOffscreen.__stele_fit = true;
-				}
-				return fallbackOffscreen;
-			}
+			return webglMatch || fitMatch || null;
 		}
 		return null;
 	}
@@ -366,7 +382,7 @@ export function createWebGlBridge(root, getWasm) {
 	let anisoExt = null;
 	let maxAniso = 1;
 
-	function finalizeLocalProgramLink(c, programId) {
+	function finalizeLocalProgramLink(c, programId, restoreCurrent = true) {
 		const pm = programMeta[programId];
 		if (!pm || !pm.linked) return;
 		let p = programs[programId];
@@ -400,7 +416,7 @@ export function createWebGlBridge(root, getWasm) {
 			pm.localReady = true;
 			pm.localLinkedOk = !!c.getProgramParameter(p, c.LINK_STATUS);
 		}
-		refreshUniformLocsForProgram(c, programId);
+		refreshUniformLocsForProgram(c, programId, restoreCurrent);
 	}
 
 	function rebuildContextResources(c) {
@@ -414,6 +430,9 @@ export function createWebGlBridge(root, getWasm) {
 			}
 			shaders[i] = s;
 		}
+		for (let i = 1; i < programs.length; i++) {
+			programs[i] = null;
+		}
 		for (let i = 1; i < programMeta.length; i++) {
 			const pm = programMeta[i];
 			if (!pm) { programs[i] = null; continue; }
@@ -424,7 +443,7 @@ export function createWebGlBridge(root, getWasm) {
 			pm.localReady = false;
 			if (p && pm.linked && (!pm.workerCompiling || currentProgramId === i)) {
 				if (!(pm.workerDone && !pm.workerOk)) {
-					finalizeLocalProgramLink(c, i);
+					finalizeLocalProgramLink(c, i, false);
 				}
 			}
 		}
@@ -602,7 +621,7 @@ export function createWebGlBridge(root, getWasm) {
 	function getGl(forceCheck) {
 		if (perfEnabled) perfStats.getGlCalls++;
 		const curWGen = globalScope.__stele_worker_canvases_gen || 0;
-		if (!forceCheck && gl && glCanvas && glCanvas !== fallbackOffscreen &&
+		if (!forceCheck && gl && glCanvas &&
 		    glCanvas.isConnected !== false && curWGen === workerCanvasesGen) {
 			return gl;
 		}
@@ -981,7 +1000,7 @@ export function createWebGlBridge(root, getWasm) {
 					if (!uptr) {
 						if (bid && bufferMeta[bid]) {
 							bufferMeta[bid].target = target;
-							bufferMeta[bid].data = null;
+							bufferMeta[bid].data = (usage === 0x88E4 && usize > 0) ? new Uint8Array(usize) : null;
 							bufferMeta[bid].size = usize;
 							bufferMeta[bid].usage = usage;
 						}
@@ -1323,36 +1342,46 @@ export function createWebGlBridge(root, getWasm) {
 					const loc = c.getUniformLocation(p, name);
 					if (!loc) return -1;
 					uniformLocs.push(loc);
-					uniformMeta.push({ programId, name });
+					uniformMeta.push({ programId, name, kind: 0, v0: 0, v1: 0, v2: 0, v3: 0 });
 					return uniformLocs.length - 1;
 				},
 				glUniform1i(locId, v0) {
 					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
+					const um = locId >= 0 ? uniformMeta[locId] : null;
+					if (um) { um.kind = 1; um.v0 = v0 | 0; }
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform1i(loc, v0);
 				},
 				glUniform1f(locId, v0) {
 					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
+					const um = locId >= 0 ? uniformMeta[locId] : null;
+					if (um) { um.kind = 2; um.v0 = v0; }
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform1f(loc, v0);
 				},
 				glUniform2f(locId, v0, v1) {
 					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
+					const um = locId >= 0 ? uniformMeta[locId] : null;
+					if (um) { um.kind = 3; um.v0 = v0; um.v1 = v1; }
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform2f(loc, v0, v1);
 				},
 				glUniform3f(locId, v0, v1, v2) {
 					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
+					const um = locId >= 0 ? uniformMeta[locId] : null;
+					if (um) { um.kind = 4; um.v0 = v0; um.v1 = v1; um.v2 = v2; }
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform3f(loc, v0, v1, v2);
 				},
 				glUniform4f(locId, v0, v1, v2, v3) {
 					if (perfEnabled) perfStats.uniformUploads++;
 					const c = getGl();
+					const um = locId >= 0 ? uniformMeta[locId] : null;
+					if (um) { um.kind = 5; um.v0 = v0; um.v1 = v1; um.v2 = v2; um.v3 = v3; }
 					const loc = locId >= 0 ? uniformLocs[locId] : null;
 					if (c && loc) c.uniform4f(loc, v0, v1, v2, v3);
 				},
@@ -1441,7 +1470,10 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const b = buffers[bufferId];
 					if (c && b) c.deleteBuffer(b);
-					buffers[bufferId] = null;
+					if (bufferId > 0 && bufferId < buffers.length) {
+						buffers[bufferId] = null;
+						bufferMeta[bufferId] = null;
+					}
 				},
 				glCreateFramebuffer() {
 					const c = getGl();
@@ -1651,6 +1683,8 @@ export function createWebGlBridge(root, getWasm) {
 						case 9: { /* UNIFORM1I */
 							const locId = i32[pos++];
 							const v0 = i32[pos++];
+							const um = locId >= 0 ? uniformMeta[locId] : null;
+							if (um) { um.kind = 1; um.v0 = v0 | 0; }
 							const loc = locId >= 0 ? uniformLocs[locId] : null;
 							if (loc) c.uniform1i(loc, v0);
 							if (perfEnabled) perfStats.uniformUploads++;
@@ -1659,6 +1693,8 @@ export function createWebGlBridge(root, getWasm) {
 						case 10: { /* UNIFORM1F */
 							const locId = i32[pos++];
 							const v0 = f32[pos++];
+							const um = locId >= 0 ? uniformMeta[locId] : null;
+							if (um) { um.kind = 2; um.v0 = v0; }
 							const loc = locId >= 0 ? uniformLocs[locId] : null;
 							if (loc) c.uniform1f(loc, v0);
 							if (perfEnabled) perfStats.uniformUploads++;
@@ -1668,6 +1704,8 @@ export function createWebGlBridge(root, getWasm) {
 							const locId = i32[pos++];
 							const v0 = f32[pos++];
 							const v1 = f32[pos++];
+							const um = locId >= 0 ? uniformMeta[locId] : null;
+							if (um) { um.kind = 3; um.v0 = v0; um.v1 = v1; }
 							const loc = locId >= 0 ? uniformLocs[locId] : null;
 							if (loc) c.uniform2f(loc, v0, v1);
 							if (perfEnabled) perfStats.uniformUploads++;
@@ -1678,6 +1716,8 @@ export function createWebGlBridge(root, getWasm) {
 							const v0 = f32[pos++];
 							const v1 = f32[pos++];
 							const v2 = f32[pos++];
+							const um = locId >= 0 ? uniformMeta[locId] : null;
+							if (um) { um.kind = 4; um.v0 = v0; um.v1 = v1; um.v2 = v2; }
 							const loc = locId >= 0 ? uniformLocs[locId] : null;
 							if (loc) c.uniform3f(loc, v0, v1, v2);
 							if (perfEnabled) perfStats.uniformUploads++;
@@ -1689,6 +1729,8 @@ export function createWebGlBridge(root, getWasm) {
 							const v1 = f32[pos++];
 							const v2 = f32[pos++];
 							const v3 = f32[pos++];
+							const um = locId >= 0 ? uniformMeta[locId] : null;
+							if (um) { um.kind = 5; um.v0 = v0; um.v1 = v1; um.v2 = v2; um.v3 = v3; }
 							const loc = locId >= 0 ? uniformLocs[locId] : null;
 							if (loc) c.uniform4f(loc, v0, v1, v2, v3);
 							if (perfEnabled) perfStats.uniformUploads++;
