@@ -123,6 +123,34 @@ static void fbsize_cb(GLFWwindow *w, int width, int height) {
 	input_call(0, 0, 4);
 }
 
+static void drop_cb(GLFWwindow *w, int count, const char **paths) {
+	(void)w;
+	int32_t mx = 0, my = 0;
+	lam_mouse_pos(&mx, &my);
+	for (int i = 0; i < count; i++) {
+		if (!paths[i]) continue;
+		lam_event_t ev = {0};
+		ev.type   = LAM_EV_FILE_DROP;
+		ev.x      = mx;
+		ev.y      = my;
+		ev.code   = (uint32_t)i;
+		ev.action = count;
+		ev.text   = paths[i];
+		input_emit_event(&ev);
+	}
+}
+
+const char *lam_clipboard_get_text(void)
+{
+	return g_win ? glfwGetClipboardString(g_win) : NULL;
+}
+
+void lam_clipboard_set_text(const char *text)
+{
+	if (g_win && text)
+		glfwSetClipboardString(g_win, text);
+}
+
 static void input_init(int grab)
 {
 	g_grab = grab;
@@ -137,6 +165,7 @@ static void input_init(int grab)
 	glfwSetCursorPosCallback(g_win, cursor_cb);
 	glfwSetScrollCallback(g_win, scroll_cb);
 	glfwSetFramebufferSizeCallback(g_win, fbsize_cb);
+	glfwSetDropCallback(g_win, drop_cb);
 }
 
 static void input_poll(void)

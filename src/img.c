@@ -156,6 +156,40 @@ unsigned lam_tex_load(const char *filename) {
 	return ref;
 }
 
+unsigned lam_tex_create_rgba(const char *key, const uint8_t *rgba,
+                             uint32_t w, uint32_t h)
+{
+	uint8_t *data = NULL;
+	const unsigned *ref_r;
+
+	if (!key || !key[0] || !rgba || w == 0 || h == 0)
+		return CM_MISS;
+
+	if (!img_be_hd)
+		img_construct();
+
+	ref_r = corm_get(img_name_hd, key);
+	if (ref_r) {
+		img_t *old = (img_t *) corm_get(img_hd, ref_r);
+		if (old) {
+			lam_tex_ureg(*ref_r);
+			free(old->data);
+			free(old->filename);
+			old->data = NULL;
+			old->filename = NULL;
+		}
+	}
+
+	unsigned ref = img_new(&data, key, w, h, IMG_LOAD);
+	if (!data)
+		return CM_MISS;
+
+	memcpy(data, rgba, (size_t)w * (size_t)h * 4u);
+	lam_tex_upd(ref, 0, 0, w, h, data);
+	lam_tex_set_linear(ref);
+	return ref;
+}
+
 void
 lam_tex_save(unsigned ref)
 {

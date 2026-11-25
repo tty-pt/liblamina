@@ -17,6 +17,7 @@ struct lam_ui_div {
 
 	int32_t x, y, w, h;
 	uint32_t content_w, content_h;
+	uint32_t intrinsic_w, intrinsic_h;
 
 	const char *class_name;
 	char       *class_owned;

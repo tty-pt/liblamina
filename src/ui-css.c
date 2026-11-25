@@ -38,10 +38,12 @@ enum {
 	P_OVERFLOW_X, P_OVERFLOW_Y,
 	P_Z_INDEX, P_OPACITY, P_VISIBILITY, P_POINTER_EVENTS,
 	P_BOX_SHADOW, P_BOX_SIZING, P_OBJECT_FIT,
-	P_TRANSFORM, P_GRID_COLS, P_GRID_ROW,
+	P_TRANSFORM, P_GRID_COLS, P_GRID_ROW, P_GRID_COL_SPAN,
+	P_JUSTIFY_ITEMS, P_JUSTIFY_SELF,
 	P_BG_IMAGE, P_BG_SIZE, P_BG_BLEND,
 	P_TEXT_SHADOW, P_OUTLINE_W, P_OUTLINE_C,
 	P_BACKDROP_BLUR, P_CURSOR,
+	P_SVG_FILL, P_SVG_STROKE, P_SVG_STROKE_W,
 	P_COUNT
 };
 
@@ -123,6 +125,7 @@ typedef struct css_compound {
 	uint8_t is_root;
 	uint8_t is_first_child;
 	uint8_t is_last_child;
+	uint8_t is_empty;
 	uint8_t is_pseudo_el;
 	struct css_compound *nots;
 	uint8_t n_nots;
@@ -598,8 +601,9 @@ static int parse_len(const char *s, lam_len_t *out)
 		out->unit = LAM_LEN_PX; out->val = 5.0f; return 1;
 	}
 
-	/* min(A, B) */
-	if (ascii_strncasecmp(s, "min(", 4) == 0) {
+	/* min(A, B) / max(A, B) */
+	if (ascii_strncasecmp(s, "min(", 4) == 0 || ascii_strncasecmp(s, "max(", 4) == 0) {
+		int is_max = (s[0] == 'm' || s[0] == 'M') && (s[1] == 'a' || s[1] == 'A');
 		const char *p = s + 4;
 		int par = 1;
 		const char *comma = NULL, *close = NULL;
@@ -624,18 +628,21 @@ static int parse_len(const char *s, lam_len_t *out)
 			int oa = parse_len(a_buf, &la);
 			int ob = parse_len(b_buf, &lb);
 			if (oa && ob) {
-				if (la.unit == LAM_LEN_PCT && la.val >= 99.0f && lb.unit != LAM_LEN_PCT) {
-					*out = lb;
-					return 1;
-				}
-				if (lb.unit == LAM_LEN_PCT && lb.val >= 99.0f && la.unit != LAM_LEN_PCT) {
-					*out = la;
-					return 1;
+				if (!is_max) {
+					if (la.unit == LAM_LEN_PCT && la.val >= 99.0f && lb.unit != LAM_LEN_PCT) {
+						*out = lb;
+						return 1;
+					}
+					if (lb.unit == LAM_LEN_PCT && lb.val >= 99.0f && la.unit != LAM_LEN_PCT) {
+						*out = la;
+						return 1;
+					}
 				}
 				if (la.unit != LAM_LEN_PCT && lb.unit != LAM_LEN_PCT) {
 					int32_t pa = len_to_px_static(la, 16.0f);
 					int32_t pb = len_to_px_static(lb, 16.0f);
-					*out = (pa <= pb) ? la : lb;
+					*out = is_max ? ((pa >= pb) ? la : lb)
+					              : ((pa <= pb) ? la : lb);
 					return 1;
 				}
 				*out = la;
@@ -664,6 +671,16 @@ static int parse_len(const char *s, lam_len_t *out)
 		else if (*p == '%') { u1 = LAM_LEN_PCT; p++; }
 
 		while (isspace((unsigned char)*p)) p++;
+		while (*p == '*' || *p == '/') {
+			char op = *p++;
+			while (isspace((unsigned char)*p)) p++;
+			float f = strtof(p, &ep);
+			if (ep == p) break;
+			p = ep;
+			if (op == '*') v1 *= f;
+			else if (f != 0.0f) v1 /= f;
+			while (isspace((unsigned char)*p)) p++;
+		}
 		float sign = 1.0f;
 		if (*p == '+') { sign = 1.0f; p++; }
 		else if (*p == '-') { sign = -1.0f; p++; }
@@ -1479,6 +1496,33 @@ static void apply_decl(lam_ui_style_t *st, const css_sheet_t *sh,
 		prop_mark(st, P_JUSTIFY, imp);
 		return;
 	}
+	if (ascii_strcasecmp(prop, "justify-items") == 0) {
+		if (!prop_can_write(st, P_JUSTIFY_ITEMS, imp)) return;
+		lam_ui_align_mode_t m;
+		if (parse_align_val(vbuf, &m)) {
+			st->justify_items = m;
+			prop_mark(st, P_JUSTIFY_ITEMS, imp);
+		}
+		return;
+	}
+	if (ascii_strcasecmp(prop, "justify-self") == 0) {
+		if (!prop_can_write(st, P_JUSTIFY_SELF, imp)) return;
+		lam_ui_align_mode_t m;
+		if (parse_align_val(vbuf, &m)) {
+			st->justify_self = m;
+			prop_mark(st, P_JUSTIFY_SELF, imp);
+		}
+		return;
+	}
+	if (ascii_strcasecmp(prop, "place-items") == 0) {
+		char toks[8][128];
+		int nt = split_tokens(vbuf, toks, 2);
+		if (nt >= 1) {
+			apply_decl(st, sh, "align-items", toks[0], imp);
+			apply_decl(st, sh, "justify-items", nt >= 2 ? toks[1] : toks[0], imp);
+		}
+		return;
+	}
 
 	/* ── gap / row-gap / column-gap ── */
 	if (ascii_strcasecmp(prop, "gap") == 0) {
@@ -1918,9 +1962,10 @@ static void apply_decl(lam_ui_style_t *st, const css_sheet_t *sh,
 		int nt = split_tokens(first, toks, 6);
 		float nums[4] = { 0, 0, 0, 0 };
 		int nn = 0;
+		int is_inset = 0;
 		uint32_t col = 0x80000000u;
 		for (int i = 0; i < nt; i++) {
-			if (ascii_strcasecmp(toks[i], "inset") == 0) return; /* skip inset shadows */
+			if (ascii_strcasecmp(toks[i], "inset") == 0) { is_inset = 1; continue; }
 			uint32_t c;
 			if (parse_color(toks[i], &c)) {
 				col = c;
@@ -1929,6 +1974,21 @@ static void apply_decl(lam_ui_style_t *st, const css_sheet_t *sh,
 				if (parse_len(toks[i], &l))
 					nums[nn++] = (float)len_to_px_static(l, em_px);
 			}
+		}
+		if (is_inset) {
+			/* Common CSS pattern: inset 0 0 0 1px var(--accent) focus/active ring */
+			if (nn >= 4 && nums[0] == 0.0f && nums[1] == 0.0f &&
+			    nums[2] == 0.0f && nums[3] > 0.0f) {
+				if (prop_can_write(st, P_BORDER_W, imp)) {
+					st->border_width = (uint32_t)lroundf(nums[3]);
+					prop_mark(st, P_BORDER_W, imp);
+				}
+				if (prop_can_write(st, P_BORDER_C, imp)) {
+					st->border_color = col;
+					prop_mark(st, P_BORDER_C, imp);
+				}
+			}
+			return;
 		}
 		if (nn >= 2) {
 			st->box_shadow_offset_x = nums[0];
@@ -2114,46 +2174,97 @@ static void apply_decl(lam_ui_style_t *st, const css_sheet_t *sh,
 		return;
 	}
 
-	/* ── grid-template-columns / grid-auto-rows ── */
+	/* ── grid-template-columns / grid-auto-rows / grid-column ── */
 	if (ascii_strcasecmp(prop, "grid-template-columns") == 0) {
 		if (!prop_can_write(st, P_GRID_COLS, imp)) return;
+		memset(st->grid_col_kind, 0, sizeof(st->grid_col_kind));
+		memset(st->grid_col_val, 0, sizeof(st->grid_col_val));
 		if (ascii_strncasecmp(vbuf, "repeat(", 7) == 0) {
 			const char *p = vbuf + 7;
 			int cnt = atoi(p);
 			const char *comma = strchr(p, ',');
 			uint32_t col_px = 0;
+			uint8_t kind = 0; /* 0=fr, 1=px, 2=auto */
+			float tval = 1.0f;
 			if (comma) {
 				comma++;
 				while (isspace((unsigned char)*comma)) comma++;
-				if (!strstr(comma, "fr")) {
+				if (ascii_strncasecmp(comma, "auto", 4) == 0) {
+					kind = 2;
+				} else if (strstr(comma, "fr")) {
+					kind = 0;
+					float fv = strtof(comma, NULL);
+					tval = fv > 0.0f ? fv : 1.0f;
+				} else {
 					lam_len_t l;
 					if (parse_len(comma, &l)) {
 						int32_t px = len_to_px_static(l, em_px);
-						if (px > 0) col_px = (uint32_t)px;
+						if (px > 0) {
+							col_px = (uint32_t)px;
+							kind = 1;
+							tval = (float)px;
+						}
 					}
 				}
 			}
 			if (cnt > 0) {
 				st->grid_cols = (uint32_t)cnt;
 				st->grid_col_px = col_px;
+				int lim = cnt < LAM_UI_GRID_MAX_COLS ? cnt : LAM_UI_GRID_MAX_COLS;
+				for (int i = 0; i < lim; i++) {
+					st->grid_col_kind[i] = kind;
+					st->grid_col_val[i] = tval;
+				}
 				prop_mark(st, P_GRID_COLS, imp);
 			}
 		} else {
 			char toks[8][128];
-			int nt = split_tokens(vbuf, toks, 8);
+			int nt = split_tokens(vbuf, toks, LAM_UI_GRID_MAX_COLS);
 			if (nt > 0) {
 				st->grid_cols = (uint32_t)nt;
 				st->grid_col_px = 0;
-				if (!strstr(toks[0], "fr")) {
-					lam_len_t l;
-					if (parse_len(toks[0], &l)) {
-						int32_t px = len_to_px_static(l, em_px);
-						if (px > 0) st->grid_col_px = (uint32_t)px;
+				for (int i = 0; i < nt; i++) {
+					const char *tk = toks[i];
+					const char *fr = strstr(tk, "fr");
+					if (ascii_strcasecmp(tk, "auto") == 0 ||
+					    ascii_strcasecmp(tk, "min-content") == 0 ||
+					    ascii_strcasecmp(tk, "max-content") == 0 ||
+					    ascii_strncasecmp(tk, "fit-content(", 12) == 0) {
+						st->grid_col_kind[i] = 2;
+						st->grid_col_val[i] = 0.0f;
+					} else if (fr) {
+						st->grid_col_kind[i] = 0;
+						float fv = strtof(tk, NULL);
+						st->grid_col_val[i] = fv > 0.0f ? fv : 1.0f;
+					} else {
+						lam_len_t l;
+						if (parse_len(tk, &l) && l.unit != LAM_LEN_AUTO) {
+							int32_t px = len_to_px_static(l, em_px);
+							if (px > 0) {
+								st->grid_col_kind[i] = 1;
+								st->grid_col_val[i] = (float)px;
+							} else {
+								st->grid_col_kind[i] = 0;
+								st->grid_col_val[i] = 1.0f;
+							}
+						} else {
+							st->grid_col_kind[i] = 2;
+							st->grid_col_val[i] = 0.0f;
+						}
 					}
 				}
 				prop_mark(st, P_GRID_COLS, imp);
 			}
 		}
+		return;
+	}
+	if (ascii_strcasecmp(prop, "grid-column") == 0) {
+		if (!prop_can_write(st, P_GRID_COL_SPAN, imp)) return;
+		if (strstr(vbuf, "-1") != NULL)
+			st->grid_col_span_full = 1;
+		else
+			st->grid_col_span_full = 0;
+		prop_mark(st, P_GRID_COL_SPAN, imp);
 		return;
 	}
 	if (ascii_strcasecmp(prop, "grid-auto-rows") == 0 ||
@@ -2163,6 +2274,30 @@ static void apply_decl(lam_ui_style_t *st, const css_sheet_t *sh,
 		if (parse_len(vbuf, &l) && l.unit == LAM_LEN_PX && l.val > 0) {
 			st->grid_row_px = (uint32_t)lroundf(l.val);
 			prop_mark(st, P_GRID_ROW, imp);
+		}
+		return;
+	}
+	/* ── SVG presentation properties (fill / stroke / stroke-width) ── */
+	if (ascii_strcasecmp(prop, "fill") == 0) {
+		if (!prop_can_write(st, P_SVG_FILL, imp)) return;
+		st->svg_fill = (ascii_strcasecmp(vbuf, "none") == 0 ||
+		                ascii_strcasecmp(vbuf, "transparent") == 0) ? 0 : 1;
+		prop_mark(st, P_SVG_FILL, imp);
+		return;
+	}
+	if (ascii_strcasecmp(prop, "stroke") == 0) {
+		if (!prop_can_write(st, P_SVG_STROKE, imp)) return;
+		st->svg_stroke = (ascii_strcasecmp(vbuf, "none") == 0 ||
+		                  ascii_strcasecmp(vbuf, "transparent") == 0) ? 0 : 1;
+		prop_mark(st, P_SVG_STROKE, imp);
+		return;
+	}
+	if (ascii_strcasecmp(prop, "stroke-width") == 0) {
+		if (!prop_can_write(st, P_SVG_STROKE_W, imp)) return;
+		float sw = strtof(vbuf, NULL);
+		if (sw > 0.0f) {
+			st->svg_stroke_width = sw;
+			prop_mark(st, P_SVG_STROKE_W, imp);
 		}
 		return;
 	}
@@ -2331,6 +2466,9 @@ static int parse_compound(const char **pp, const char *end,
 				*spec += (1u << 8);
 			} else if (ascii_strcasecmp(pname, "last-child") == 0) {
 				out->is_last_child = 1;
+				*spec += (1u << 8);
+			} else if (ascii_strcasecmp(pname, "empty") == 0) {
+				out->is_empty = 1;
 				*spec += (1u << 8);
 			} else if (ascii_strcasecmp(pname, "before") == 0 ||
 			           ascii_strcasecmp(pname, "after") == 0 ||
@@ -2802,6 +2940,36 @@ int lam_css_load_file(uint32_t ss, const char *path)
 	return res;
 }
 
+int lam_css_set_var(uint32_t ss, const char *name, const char *val)
+{
+	if (!name || !*name) return -1;
+	css_sheet_t *sh = sheet_get_or_create(ss);
+	if (!sh) return -1;
+	for (int i = (int)sh->n_vars - 1; i >= 0; i--) {
+		if (sh->vars[i].media.flags == M_NONE && strcmp(sh->vars[i].name, name) == 0) {
+			char *nv = xstrndup(val ? val : "", val ? strlen(val) : 0);
+			if (!nv) return -1;
+			free(sh->vars[i].val);
+			sh->vars[i].val = nv;
+			return 0;
+		}
+	}
+	if (sh->n_vars >= sh->cap_vars) {
+		uint32_t nc = sh->cap_vars ? sh->cap_vars * 2 : 64;
+		css_var_t *nv = realloc(sh->vars, nc * sizeof(css_var_t));
+		if (!nv) return -1;
+		sh->vars = nv;
+		sh->cap_vars = nc;
+	}
+	sh->vars[sh->n_vars].name = xstrndup(name, strlen(name));
+	sh->vars[sh->n_vars].val  = xstrndup(val ? val : "", val ? strlen(val) : 0);
+	sh->vars[sh->n_vars].media.flags = M_NONE;
+	sh->vars[sh->n_vars].media.max_w = 0;
+	sh->vars[sh->n_vars].media.min_w = 0;
+	sh->n_vars++;
+	return 0;
+}
+
 /* ── Selector matcher ───────────────────────────────────────────────────── */
 
 int lam_ui_has_class(const lam_ui_div_t *div, const char *cls, size_t len)
@@ -2853,6 +3021,8 @@ static int match_compound(const lam_ui_div_t *d, const css_compound_t *c)
 	if (c->is_first_child && d->parent && d->parent->first_child != d)
 		return 0;
 	if (c->is_last_child && d->next_sibling != NULL)
+		return 0;
+	if (c->is_empty && (d->first_child != NULL || (d->text && d->text[0] != '\0')))
 		return 0;
 
 	for (uint8_t i = 0; i < c->n_attrs; i++) {
@@ -2929,6 +3099,10 @@ static int match_selector_part(const lam_ui_div_t *d, const css_rule_t *r, int i
 
 void lam_css_apply_node(lam_ui_div_t *div, uint32_t ss, lam_ui_style_t *dst)
 {
+	if (div && div->tag && ascii_strcasecmp(div->tag, "button") == 0)
+		dst->text_align = LAM_UI_TEXT_ALIGN_CENTER;
+	if (div && lam_ui_get_attr(div, "hidden") != NULL)
+		dst->display = LAM_UI_DISPLAY_NONE;
 	css_sheet_t *sh = sheet_find(ss);
 	if (!sh || sh->n_rules == 0)
 		return;

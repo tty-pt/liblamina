@@ -431,6 +431,14 @@ void lam_ui_set_size(lam_ui_div_t *div, int32_t w, int32_t h)
 	LAM_UI_STYLE(div, height, h);
 }
 
+void lam_ui_set_intrinsic_size(lam_ui_div_t *div, uint32_t w, uint32_t h)
+{
+	if (!div) return;
+	div->intrinsic_w = w;
+	div->intrinsic_h = h;
+	div->needs_layout = 1;
+}
+
 void lam_ui_set_bg(lam_ui_div_t *div, uint32_t color)
 {
 	if (!div || !div->style) return;
@@ -526,6 +534,122 @@ static int gather_effective_children(lam_ui_div_t *parent, lam_ui_div_t **out, i
 /* ── Content size measurement ───────────────────────────────────────────── */
 
 static void measure_content_size_ex(lam_ui_div_t *c, uint32_t avail_w, uint32_t avail_h,
+                                    int pct_w_def, int pct_h_def);
+
+static uint32_t grid_assign_cells(lam_ui_div_t *const *items, int n, uint32_t cols,
+                                  uint32_t *out_row, uint32_t *out_col, uint8_t *out_span)
+{
+	uint32_t r = 0, c = 0;
+	for (int i = 0; i < n; i++) {
+		if (items[i]->style->grid_col_span_full && cols > 1) {
+			if (c > 0) { r++; c = 0; }
+			out_row[i] = r;
+			out_col[i] = 0;
+			out_span[i] = (uint8_t)(cols < 255 ? cols : 255);
+			r++;
+			c = 0;
+		} else {
+			out_row[i] = r;
+			out_col[i] = c;
+			out_span[i] = 1;
+			c++;
+			if (c >= cols) { r++; c = 0; }
+		}
+	}
+	return c > 0 ? r + 1 : r;
+}
+
+static void grid_resolve_col_widths(const lam_ui_style_t *s,
+                                    lam_ui_div_t *const *items, int n,
+                                    const uint32_t *item_col, const uint8_t *item_span,
+                                    uint32_t cols, float avail_w, float avail_h,
+                                    int definite_w, float *col_w)
+{
+	uint32_t c_lim = cols < LAM_UI_GRID_MAX_COLS ? cols : LAM_UI_GRID_MAX_COLS;
+	float total_gap = (cols > 1) ? (float)((cols - 1) * s->column_gap) : 0.f;
+
+	if (cols > LAM_UI_GRID_MAX_COLS) {
+		float cw = s->grid_col_px ? (float)s->grid_col_px
+			: fmaxf(1.f, (avail_w - total_gap) / (float)cols);
+		for (uint32_t c = 0; c < c_lim; c++) col_w[c] = cw;
+		return;
+	}
+
+	uint8_t kind[LAM_UI_GRID_MAX_COLS];
+	float tval[LAM_UI_GRID_MAX_COLS];
+	float fixed_sum = 0.f;
+	float fr_sum = 0.f;
+
+	for (uint32_t c = 0; c < cols; c++) {
+		if (s->grid_col_px > 0) {
+			kind[c] = 1;
+			tval[c] = (float)s->grid_col_px;
+		} else if (s->grid_cols > 0) {
+			kind[c] = s->grid_col_kind[c];
+			tval[c] = s->grid_col_val[c];
+			if (kind[c] == 0 && tval[c] <= 0.f) tval[c] = 1.f;
+		} else {
+			kind[c] = 0;
+			tval[c] = 1.f;
+		}
+
+		if (kind[c] == 1) {
+			col_w[c] = tval[c];
+			fixed_sum += col_w[c];
+		} else if (kind[c] == 2) {
+			float mx = 0.f;
+			for (int i = 0; i < n; i++) {
+				if (item_col[i] != c || item_span[i] != 1) continue;
+				lam_ui_div_t *ch = items[i];
+				measure_content_size_ex(ch, (uint32_t)fmaxf(0.f, avail_w),
+				                        (uint32_t)fmaxf(0.f, avail_h), 0, 0);
+				int has_ew = 0;
+				int32_t ew = resolve_style_w(ch->style, (int32_t)avail_w, &has_ew);
+				float w = has_ew ? (float)ew : (float)ch->content_w;
+				float mh = (float)((ch->style->margin_left > 0 ? ch->style->margin_left : 0) +
+				                   (ch->style->margin_right > 0 ? ch->style->margin_right : 0));
+				if (w + mh > mx) mx = w + mh;
+			}
+			col_w[c] = mx;
+			fixed_sum += col_w[c];
+		} else {
+			col_w[c] = 0.f;
+			fr_sum += tval[c];
+		}
+	}
+
+	if (fr_sum > 0.f) {
+		if (definite_w) {
+			float rem = avail_w - total_gap - fixed_sum;
+			if (rem < 0.f) rem = 0.f;
+			for (uint32_t c = 0; c < cols; c++) {
+				if (kind[c] == 0)
+					col_w[c] = rem * (tval[c] / fr_sum);
+			}
+		} else {
+			float rem = avail_w - total_gap - fixed_sum;
+			if (rem < 0.f) rem = 0.f;
+			for (uint32_t c = 0; c < cols; c++) {
+				if (kind[c] != 0) continue;
+				float track_avail = rem * (tval[c] / fr_sum);
+				float mx = 0.f;
+				for (int i = 0; i < n; i++) {
+					if (item_col[i] != c || item_span[i] != 1) continue;
+					lam_ui_div_t *ch = items[i];
+					measure_content_size_ex(ch, (uint32_t)fmaxf(0.f, track_avail),
+					                        (uint32_t)fmaxf(0.f, avail_h), 0, 0);
+					float mh = (float)((ch->style->margin_left > 0 ? ch->style->margin_left : 0) +
+					                   (ch->style->margin_right > 0 ? ch->style->margin_right : 0));
+					if ((float)ch->content_w + mh > mx)
+						mx = (float)ch->content_w + mh;
+				}
+				col_w[c] = mx;
+			}
+		}
+	}
+}
+
+static void measure_content_size_ex(lam_ui_div_t *c, uint32_t avail_w, uint32_t avail_h,
                                     int pct_w_def, int pct_h_def)
 {
 	const lam_ui_style_t *s = c->style;
@@ -563,22 +687,56 @@ static void measure_content_size_ex(lam_ui_div_t *c, uint32_t avail_w, uint32_t 
 	int vis_count = 0;
 	if (s->display == LAM_UI_DISPLAY_GRID) {
 		uint32_t cols = s->grid_cols ? s->grid_cols : 1;
-		uint32_t col_w = s->grid_col_px;
-		uint32_t row_h = s->grid_row_px;
+		lam_ui_div_t *items[MAX_CHILDREN];
+		uint32_t item_row[MAX_CHILDREN], item_col[MAX_CHILDREN];
+		uint8_t item_span[MAX_CHILDREN];
 		for (int i = 0; i < n_kids; i++) {
-			lam_ui_div_t *ch = kids[i];
-			if (is_out_of_flow(ch->style))
-				continue;
-			measure_content_size_ex(ch, col_w ? col_w : child_avail_w, child_avail_h,
-			                        col_w ? 1 : child_pct_w, row_h ? 1 : child_pct_h);
-			if (ch->content_w > col_w && !s->grid_col_px) col_w = ch->content_w;
-			if (ch->content_h > row_h && !s->grid_row_px) row_h = ch->content_h;
-			vis_count++;
+			if (!is_out_of_flow(kids[i]->style))
+				items[vis_count++] = kids[i];
 		}
 		if (vis_count > 0) {
-			uint32_t rows = ((uint32_t)vis_count + cols - 1) / cols;
-			inner_w = cols * col_w + (cols > 1 ? (cols - 1) * s->column_gap : 0);
-			inner_h = rows * row_h + (rows > 1 ? (rows - 1) * s->row_gap : 0);
+			uint32_t rows = grid_assign_cells(items, vis_count, cols,
+			                                  item_row, item_col, item_span);
+			float col_w[LAM_UI_GRID_MAX_COLS];
+			grid_resolve_col_widths(s, items, vis_count, item_col, item_span,
+			                        cols, (float)child_avail_w, (float)child_avail_h,
+			                        has_w, col_w);
+			float sum_cw = (cols > 1 ? (float)((cols - 1) * s->column_gap) : 0.f);
+			for (uint32_t cc = 0; cc < cols; cc++)
+				sum_cw += col_w[cc < LAM_UI_GRID_MAX_COLS ? cc : 0];
+			float full_w = has_w ? (float)child_avail_w : sum_cw;
+
+			float row_h[MAX_CHILDREN];
+			uint32_t r_lim = rows < MAX_CHILDREN ? rows : MAX_CHILDREN;
+			for (uint32_t r = 0; r < r_lim; r++)
+				row_h[r] = s->grid_row_px ? (float)s->grid_row_px : 0.f;
+
+			for (int i = 0; i < vis_count; i++) {
+				lam_ui_div_t *ch = items[i];
+				float cw = (item_span[i] > 1)
+					? full_w
+					: col_w[item_col[i] < LAM_UI_GRID_MAX_COLS ? item_col[i] : 0];
+				if (cw < 1.f && !has_w) cw = (float)child_avail_w;
+				measure_content_size_ex(ch, (uint32_t)fmaxf(0.f, cw), child_avail_h,
+				                        (cw > 0.f) ? 1 : child_pct_w,
+				                        s->grid_row_px ? 1 : child_pct_h);
+				if (item_span[i] > 1 && (float)ch->content_w > sum_cw)
+					sum_cw = (float)ch->content_w;
+				if (!s->grid_row_px && item_row[i] < r_lim) {
+					int ch_has_h = 0;
+					int32_t ch_eh = resolve_style_h(ch->style, (int32_t)child_avail_h, &ch_has_h);
+					float h = ch_has_h ? (float)ch_eh : (float)ch->content_h;
+					float mv = (float)((ch->style->margin_top > 0 ? ch->style->margin_top : 0) +
+					                   (ch->style->margin_bottom > 0 ? ch->style->margin_bottom : 0));
+					if (h + mv > row_h[item_row[i]])
+						row_h[item_row[i]] = h + mv;
+				}
+			}
+			float total_h = (r_lim > 1 ? (float)((r_lim - 1) * s->row_gap) : 0.f);
+			for (uint32_t r = 0; r < r_lim; r++)
+				total_h += row_h[r];
+			inner_w = (uint32_t)lroundf(fmaxf(0.f, sum_cw));
+			inner_h = (uint32_t)lroundf(fmaxf(0.f, total_h));
 		}
 	} else {
 		int is_row = (s->display == LAM_UI_DISPLAY_FLEX ||
@@ -620,6 +778,31 @@ static void measure_content_size_ex(lam_ui_div_t *c, uint32_t avail_w, uint32_t 
 		measure_text_auto(&tw, &th, s, c->text, mw, mh);
 		if (tw > inner_w) inner_w = tw;
 		if (th > inner_h) inner_h = th;
+	}
+
+	if (c->intrinsic_w > 0 && c->intrinsic_h > 0 && inner_w == 0 && inner_h == 0) {
+		int eff_has_w = has_w;
+		int32_t eff_w = exp_w;
+		if (!eff_has_w && s->width_len.unit == LAM_LEN_PCT && avail_w > 0)
+			eff_w = resolve_style_w(s, (int32_t)avail_w, &eff_has_w);
+		if (eff_has_w && !has_h) {
+			int32_t cw = eff_w > (int32_t)h_chrome ? eff_w - (int32_t)h_chrome : eff_w;
+			if (cw > 0)
+				inner_h = (uint32_t)(((uint64_t)(uint32_t)cw * c->intrinsic_h + c->intrinsic_w / 2) / c->intrinsic_w);
+		} else if (has_h && !eff_has_w) {
+			int32_t ch = exp_h > (int32_t)v_chrome ? exp_h - (int32_t)v_chrome : exp_h;
+			if (ch > 0)
+				inner_w = (uint32_t)(((uint64_t)(uint32_t)ch * c->intrinsic_w + c->intrinsic_h / 2) / c->intrinsic_h);
+		} else if (!eff_has_w && !has_h) {
+			inner_w = c->intrinsic_w;
+			inner_h = c->intrinsic_h;
+			int32_t cw = clamp_min_max((int32_t)inner_w, s->min_width, s->max_width,
+			                           (int32_t)avail_w, style_em_px(s));
+			if (cw > 0 && (uint32_t)cw != inner_w) {
+				inner_h = (uint32_t)(((uint64_t)(uint32_t)cw * c->intrinsic_h + c->intrinsic_w / 2) / c->intrinsic_w);
+				inner_w = (uint32_t)cw;
+			}
+		}
 	}
 
 	inner_w += h_chrome;
@@ -1000,48 +1183,133 @@ static void lam_ui_layout_grid(lam_ui_div_t *container)
 	uint32_t col_gap = s->column_gap;
 	uint32_t row_gap = s->row_gap;
 
-	float col_w = s->grid_col_px ? (float)s->grid_col_px
-		: (inner_w - (float)((cols > 1 ? cols - 1 : 0) * col_gap)) / (float)cols;
-	if (col_w < 1.f) col_w = 1.f;
-
 	lam_ui_div_t *all_kids[MAX_CHILDREN];
 	int n_all = gather_effective_children(container, all_kids, MAX_CHILDREN);
 	lam_ui_div_t *items[MAX_CHILDREN];
+	uint32_t item_row[MAX_CHILDREN], item_col[MAX_CHILDREN];
+	uint8_t item_span[MAX_CHILDREN];
 	int n = 0;
 	for (int i = 0; i < n_all && n < MAX_CHILDREN; i++) {
-		lam_ui_div_t *c = all_kids[i];
-		if (is_out_of_flow(c->style))
-			continue;
-		measure_content_size(c, (uint32_t)col_w, (uint32_t)inner_h);
-		items[n++] = c;
+		if (!is_out_of_flow(all_kids[i]->style))
+			items[n++] = all_kids[i];
 	}
 
-	float cy = inner_y;
-	uint32_t rows = ((uint32_t)n + cols - 1) / cols;
-	for (uint32_t r = 0; r < rows; r++) {
-		float rh = s->grid_row_px ? (float)s->grid_row_px : 0.f;
-		if (rh <= 0.f) {
-			for (uint32_t col = 0; col < cols; col++) {
-				uint32_t idx = r * cols + col;
-				if ((int)idx >= n) break;
-				int has_h = 0;
-				int32_t eh = resolve_style_h(items[idx]->style, (int32_t)inner_h, &has_h);
-				float h = has_h ? (float)eh : (float)items[idx]->content_h;
-				if (h > rh) rh = h;
-			}
-			if (rh < 1.f) rh = col_w;
+	if (n > 0) {
+		uint32_t rows = grid_assign_cells(items, n, cols,
+		                                  item_row, item_col, item_span);
+		float col_w[LAM_UI_GRID_MAX_COLS];
+		grid_resolve_col_widths(s, items, n, item_col, item_span,
+		                        cols, inner_w, inner_h, 1, col_w);
+
+		float col_x[LAM_UI_GRID_MAX_COLS];
+		float cx = inner_x;
+		uint32_t c_lim = cols < LAM_UI_GRID_MAX_COLS ? cols : LAM_UI_GRID_MAX_COLS;
+		for (uint32_t c = 0; c < c_lim; c++) {
+			col_x[c] = cx;
+			cx += col_w[c] + (float)col_gap;
 		}
-		for (uint32_t col = 0; col < cols; col++) {
-			uint32_t idx = r * cols + col;
-			if ((int)idx >= n) break;
-			lam_ui_div_t *ch = items[idx];
-			ch->x = (int32_t)lroundf(inner_x + (float)col * (col_w + (float)col_gap));
-			ch->y = (int32_t)lroundf(cy);
-			ch->w = (int32_t)lroundf(col_w);
-			ch->h = (int32_t)lroundf(rh);
+
+		float row_h[MAX_CHILDREN];
+		uint32_t r_lim = rows < MAX_CHILDREN ? rows : MAX_CHILDREN;
+		for (uint32_t r = 0; r < r_lim; r++)
+			row_h[r] = s->grid_row_px ? (float)s->grid_row_px : 0.f;
+
+		for (int i = 0; i < n; i++) {
+			lam_ui_div_t *ch = items[i];
+			float cell_w = (item_span[i] > 1)
+				? inner_w
+				: col_w[item_col[i] < LAM_UI_GRID_MAX_COLS ? item_col[i] : 0];
+			measure_content_size(ch, (uint32_t)fmaxf(0.f, cell_w),
+			                     (uint32_t)fmaxf(0.f, inner_h));
+			if (!s->grid_row_px && item_row[i] < r_lim) {
+				int has_h = 0;
+				int32_t eh = resolve_style_h(ch->style, (int32_t)inner_h, &has_h);
+				float h = has_h ? (float)eh : (float)ch->content_h;
+				float mv = (float)((ch->style->margin_top > 0 ? ch->style->margin_top : 0) +
+				                   (ch->style->margin_bottom > 0 ? ch->style->margin_bottom : 0));
+				if (h + mv > row_h[item_row[i]])
+					row_h[item_row[i]] = h + mv;
+			}
+		}
+
+		/* Single-row centered/end grid (e.g. .icon-btn, #talk): stretch row to container height */
+		if (r_lim == 1 && !s->grid_row_px && row_h[0] < inner_h &&
+		    (s->align_items == LAM_UI_ALIGN_CENTER || s->align_items == LAM_UI_ALIGN_FLEX_END))
+			row_h[0] = inner_h;
+
+		float row_y[MAX_CHILDREN];
+		float cy = inner_y;
+		for (uint32_t r = 0; r < r_lim; r++) {
+			row_y[r] = cy;
+			cy += row_h[r] + (float)row_gap;
+		}
+
+		for (int i = 0; i < n; i++) {
+			lam_ui_div_t *ch = items[i];
+			const lam_ui_style_t *cs = ch->style;
+			uint32_t r = item_row[i] < r_lim ? item_row[i] : r_lim - 1;
+			uint32_t c = item_col[i];
+			float cell_x, cell_w;
+			if (item_span[i] > 1) {
+				cell_x = inner_x;
+				cell_w = inner_w;
+			} else if (c < LAM_UI_GRID_MAX_COLS) {
+				cell_x = col_x[c];
+				cell_w = col_w[c];
+			} else {
+				cell_x = inner_x + (float)c * (col_w[0] + (float)col_gap);
+				cell_w = col_w[0];
+			}
+			float cell_y = row_y[r];
+			float cell_h = row_h[r];
+
+			float ml = (float)cs->margin_left;
+			float mr = (float)cs->margin_right;
+			float mt = (float)cs->margin_top;
+			float mb = (float)cs->margin_bottom;
+			float avail_cw = fmaxf(0.f, cell_w - ml - mr);
+			float avail_ch = fmaxf(0.f, cell_h - mt - mb);
+
+			lam_ui_align_mode_t j = (cs->justify_self != LAM_UI_ALIGN_AUTO)
+				? cs->justify_self : s->justify_items;
+			int has_w = 0;
+			int32_t ew = resolve_style_w(cs, (int32_t)cell_w, &has_w);
+			float w = has_w ? (float)ew
+				: (j == LAM_UI_ALIGN_STRETCH ? avail_cw : fminf((float)ch->content_w, avail_cw));
+			w = (float)clamp_min_max((int32_t)lroundf(w), cs->min_width, cs->max_width,
+			                         (int32_t)cell_w, cs->font_size);
+
+			float x;
+			if ((cs->margin_left_auto && cs->margin_right_auto) || j == LAM_UI_ALIGN_CENTER)
+				x = cell_x + (cell_w - w) * 0.5f;
+			else if (cs->margin_left_auto || j == LAM_UI_ALIGN_FLEX_END)
+				x = cell_x + cell_w - w - mr;
+			else
+				x = cell_x + ml;
+
+			lam_ui_align_mode_t a = (cs->align_self != LAM_UI_ALIGN_AUTO)
+				? cs->align_self : s->align_items;
+			int has_h = 0;
+			int32_t eh = resolve_style_h(cs, (int32_t)inner_h, &has_h);
+			float h = has_h ? (float)eh
+				: (a == LAM_UI_ALIGN_STRETCH ? avail_ch : fminf((float)ch->content_h, avail_ch));
+			h = (float)clamp_min_max((int32_t)lroundf(h), cs->min_height, cs->max_height,
+			                         (int32_t)inner_h, cs->font_size);
+
+			float y;
+			if (a == LAM_UI_ALIGN_CENTER)
+				y = cell_y + (cell_h - h) * 0.5f;
+			else if (a == LAM_UI_ALIGN_FLEX_END)
+				y = cell_y + cell_h - h - mb;
+			else
+				y = cell_y + mt;
+
+			ch->x = (int32_t)lroundf(x);
+			ch->y = (int32_t)lroundf(y);
+			ch->w = (int32_t)lroundf(fmaxf(0.f, w));
+			ch->h = (int32_t)lroundf(fmaxf(0.f, h));
 			apply_transform_offset(ch);
 		}
-		cy += rh + (float)row_gap;
 	}
 
 	lam_ui_layout_out_of_flow(container);
@@ -1519,16 +1787,23 @@ static void render_div_rec(lam_ui_div_t *d, int32_t off_x, int32_t off_y,
 					int32_t align_x = tx;
 					if (s->text_align == LAM_UI_TEXT_ALIGN_CENTER ||
 					    ((s->display == LAM_UI_DISPLAY_FLEX || s->display == LAM_UI_DISPLAY_INLINE_FLEX) &&
-					     s->justify_content == LAM_UI_JUSTIFY_CENTER))
+					     s->justify_content == LAM_UI_JUSTIFY_CENTER) ||
+					    (s->display == LAM_UI_DISPLAY_GRID &&
+					     (s->justify_items == LAM_UI_ALIGN_CENTER ||
+					      s->justify_content == LAM_UI_JUSTIFY_CENTER)))
 						align_x = tx + (tw - (int32_t)mw) / 2;
 					else if (s->text_align == LAM_UI_TEXT_ALIGN_RIGHT)
 						align_x = tx + (tw - (int32_t)mw);
 					if (align_x < tx) align_x = tx;
 
-					/* Vertically center single-line text when container is flex-centered */
+					/* Vertically center single-line text when container is flex/grid-centered or <button> */
 					int32_t align_y = ty;
-					if ((s->display == LAM_UI_DISPLAY_FLEX || s->display == LAM_UI_DISPLAY_INLINE_FLEX) &&
-					    s->align_items == LAM_UI_ALIGN_CENTER && (int32_t)mh < th)
+					int is_btn = (d->tag && strcmp(d->tag, "button") == 0);
+					if ((((s->display == LAM_UI_DISPLAY_FLEX ||
+					       s->display == LAM_UI_DISPLAY_INLINE_FLEX ||
+					       s->display == LAM_UI_DISPLAY_GRID) &&
+					      s->align_items == LAM_UI_ALIGN_CENTER) || is_btn) &&
+					    (int32_t)mh < th)
 						align_y = ty + (th - (int32_t)mh) / 2;
 
 					int32_t ix1 = tx + tw;

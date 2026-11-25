@@ -283,7 +283,7 @@ static void gl_init(uint32_t *w_r, uint32_t *h_r)
 
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
 	glGenVertexArrays(1, &g_vao_dummy);
 
@@ -795,14 +795,14 @@ void lam_gl_draw_glyph_lcd(GLuint tex_id, uint32_t tw, uint32_t th,
 
 	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void lam_tex_reg(uint32_t ref, uint8_t *data, uint32_t w, uint32_t h)
 {
 	gl_tex_info_t tex = { .w = w, .h = h, .id = 0 };
 
-	if (lam_be.init != dummy_be_init) {
+	if (lam_has_gl()) {
 		glGenTextures(1, &tex.id);
 		glBindTexture(GL_TEXTURE_2D, tex.id);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -814,17 +814,18 @@ void lam_tex_reg(uint32_t ref, uint8_t *data, uint32_t w, uint32_t h)
 			     GL_RGBA, GL_UNSIGNED_BYTE, data);
 	}
 
-	corm_put(g_tex_map_hd, &ref, &tex);
+	if (g_tex_map_hd)
+		corm_put(g_tex_map_hd, &ref, &tex);
 }
 
 void lam_tex_upd(uint32_t ref, uint32_t x, uint32_t y,
 		 uint32_t w, uint32_t h, uint8_t *data)
 {
-	if (lam_be.init == dummy_be_init)
+	if (!lam_has_gl() || !g_tex_map_hd)
 		return;
 
 	const gl_tex_info_t *t = corm_get(g_tex_map_hd, &ref);
-	if (!t)
+	if (!t || !t->id)
 		return;
 
 	glBindTexture(GL_TEXTURE_2D, t->id);
@@ -833,12 +834,30 @@ void lam_tex_upd(uint32_t ref, uint32_t x, uint32_t y,
 			GL_RGBA, GL_UNSIGNED_BYTE, data);
 }
 
+void lam_tex_set_linear(uint32_t ref)
+{
+	if (!lam_has_gl() || !g_tex_map_hd)
+		return;
+
+	const gl_tex_info_t *t = corm_get(g_tex_map_hd, &ref);
+	if (!t || !t->id)
+		return;
+
+	glBindTexture(GL_TEXTURE_2D, t->id);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+}
+
 void lam_tex_ureg(uint32_t ref)
 {
+	if (!g_tex_map_hd)
+		return;
+
 	const gl_tex_info_t *t = corm_get(g_tex_map_hd, &ref);
 
 	if (t) {
-		glDeleteTextures(1, &t->id);
+		if (t->id && lam_has_gl())
+			glDeleteTextures(1, &t->id);
 		corm_del(g_tex_map_hd, &ref);
 	}
 }
@@ -888,7 +907,7 @@ void lam_clear(uint32_t color)
 	glDisable(GL_STENCIL_TEST);
 	glDisable(GL_SCISSOR_TEST);
 	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glClearColor(r, g, b, a);
 	glClear(GL_COLOR_BUFFER_BIT);

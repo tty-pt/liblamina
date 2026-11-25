@@ -254,6 +254,12 @@ typedef struct {
 	uint32_t grid_cols;
 	uint32_t grid_col_px;
 	uint32_t grid_row_px;
+#define LAM_UI_GRID_MAX_COLS 8
+	uint8_t  grid_col_kind[LAM_UI_GRID_MAX_COLS]; /* 0=fr, 1=px, 2=auto */
+	float    grid_col_val[LAM_UI_GRID_MAX_COLS];
+	uint8_t  grid_col_span_full; /* 1 if grid-column: 1 / -1 */
+	lam_ui_align_mode_t justify_items;
+	lam_ui_align_mode_t justify_self;
 
 	uint32_t background_color2;
 	lam_ui_box_sizing_t box_sizing;
@@ -288,6 +294,9 @@ typedef struct {
 	uint8_t  outline_width;
 	uint8_t  cursor;            /* lam_cursor_t (0 = auto) */
 	float    backdrop_blur;
+	uint8_t  svg_fill;          /* 0=none, 1=currentColor/color (default 1) */
+	uint8_t  svg_stroke;        /* 0=none, 1=currentColor/color (default 0) */
+	float    svg_stroke_width;  /* SVG user-space stroke width (default 1.5) */
 
 	uint64_t set_mask[2];
 	uint64_t imp_mask[2];
@@ -339,6 +348,12 @@ int lam_css_load_file(uint32_t ss, const char *path);
  */
 void lam_css_sheet_free(uint32_t ss);
 
+/**
+ * @brief Set or override a CSS custom property (e.g. "--lamp") at runtime.
+ * @return 0 on success, -1 on error.
+ */
+int lam_css_set_var(uint32_t ss, const char *name, const char *val);
+
 /** @} */
 
 /** @defgroup lam_ui_tree liblamina UI element tree
@@ -351,6 +366,7 @@ lam_ui_div_t *lam_ui_box(lam_ui_div_t *parent, int32_t w, int32_t h, uint32_t bg
 lam_ui_div_t *lam_ui_label(lam_ui_div_t *parent, const char *text, uint32_t font_ref, uint32_t color);
 
 void lam_ui_set_size(lam_ui_div_t *div, int32_t w, int32_t h);
+void lam_ui_set_intrinsic_size(lam_ui_div_t *div, uint32_t w, uint32_t h);
 void lam_ui_set_bg(lam_ui_div_t *div, uint32_t color);
 void lam_ui_set_padding(lam_ui_div_t *div, uint32_t left, uint32_t top, uint32_t right, uint32_t bottom);
 void lam_ui_set_flex(lam_ui_div_t *div, float grow, float shrink, int32_t basis);

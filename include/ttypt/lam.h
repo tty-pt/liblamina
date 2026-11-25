@@ -267,6 +267,8 @@ void lam_grad_rounded(uint32_t c0, uint32_t c1,
                       float border_width);
 
 unsigned lam_tex_load(const char *filename);
+unsigned lam_tex_create_rgba(const char *key, const uint8_t *rgba,
+                             uint32_t w, uint32_t h);
 void lam_tex_save(unsigned ref);
 void lam_tex_size(uint32_t *w, uint32_t *h, unsigned ref);
 uint32_t lam_tex_pick(unsigned ref, uint32_t x, uint32_t y);
@@ -293,7 +295,8 @@ typedef enum {
 	LAM_EV_MOUSE_MOVE,
 	LAM_EV_MOUSE_BTN,
 	LAM_EV_SCROLL,
-	LAM_EV_RESIZE
+	LAM_EV_RESIZE,
+	LAM_EV_FILE_DROP
 } lam_event_type_t;
 
 typedef struct {
@@ -303,6 +306,7 @@ typedef struct {
 	uint32_t code;    /* GLFW key / mouse button / Unicode codepoint */
 	int32_t  action;  /* 0 = release, 1 = press, 2 = repeat */
 	int32_t  mods;    /* bitmask: 1=shift, 2=ctrl, 4=alt, 8=super */
+	const char *text; /* Dropped file path for LAM_EV_FILE_DROP (transient) */
 } lam_event_t;
 
 typedef void (*lam_event_cb_t)(const lam_event_t *ev, void *user);
@@ -315,6 +319,8 @@ int lam_key_parse(char *target, size_t len,
                   unsigned short code, int flags);
 void lam_event_reg(lam_event_cb_t cb, void *user);
 void lam_mouse_pos(int32_t *x, int32_t *y);
+const char *lam_clipboard_get_text(void);
+void lam_clipboard_set_text(const char *text);
 
 /** @} */
 

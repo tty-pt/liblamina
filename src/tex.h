@@ -31,6 +31,8 @@ void lam_tex_ureg(uint32_t ref);
 void lam_tex_upd(uint32_t ref, uint32_t x, uint32_t y,
 		 uint32_t w, uint32_t h, uint8_t *data);
 
+void lam_tex_set_linear(uint32_t ref);
+
 uint32_t lam_tint_get(void);
 
 #endif /* LAM_TEX_H */

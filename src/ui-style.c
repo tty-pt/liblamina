@@ -135,6 +135,11 @@ void lam_ui_style_default(lam_ui_style_t *s)
 	s->transform_ty_px = s->transform_ty_pct = 0.0f;
 
 	s->grid_cols = s->grid_col_px = s->grid_row_px = 0;
+	memset(s->grid_col_kind, 0, sizeof(s->grid_col_kind));
+	memset(s->grid_col_val, 0, sizeof(s->grid_col_val));
+	s->grid_col_span_full = 0;
+	s->justify_items = LAM_UI_ALIGN_STRETCH;
+	s->justify_self = LAM_UI_ALIGN_AUTO;
 	s->box_sizing = LAM_UI_BOX_BORDER;
 	s->object_fit = LAM_UI_FIT_FILL;
 	s->font_weight = 400;
@@ -159,6 +164,9 @@ void lam_ui_style_default(lam_ui_style_t *s)
 	s->outline_width = 0;
 	s->cursor = LAM_CURSOR_AUTO;
 	s->backdrop_blur = 0.0f;
+	s->svg_fill = 1;
+	s->svg_stroke = 0;
+	s->svg_stroke_width = 1.5f;
 
 	s->set_mask[0] = s->set_mask[1] = 0;
 	s->imp_mask[0] = s->imp_mask[1] = 0;
@@ -257,6 +265,13 @@ static void lam_ui_style_merge(
 	MERGE(grid_cols);
 	MERGE(grid_col_px);
 	MERGE(grid_row_px);
+	if (src->grid_cols != 0) {
+		memcpy(dst->grid_col_kind, src->grid_col_kind, sizeof(dst->grid_col_kind));
+		memcpy(dst->grid_col_val, src->grid_col_val, sizeof(dst->grid_col_val));
+	}
+	MERGE(grid_col_span_full);
+	MERGE(justify_items);
+	MERGE(justify_self);
 
 	MERGE(border_top_width);
 	MERGE(border_right_width);
@@ -278,6 +293,9 @@ static void lam_ui_style_merge(
 	MERGE(outline_width);
 	MERGE(cursor);
 	MERGE(backdrop_blur);
+	MERGE(svg_fill);
+	MERGE(svg_stroke);
+	MERGE(svg_stroke_width);
 
 	if (src->width_len.unit != LAM_LEN_AUTO) dst->width_len = src->width_len;
 	if (src->height_len.unit != LAM_LEN_AUTO) dst->height_len = src->height_len;
