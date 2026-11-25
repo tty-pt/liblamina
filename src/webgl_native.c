@@ -913,6 +913,16 @@ void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count)
 	}
 }
 
+void lam_glTimerBegin(GLuint pass_id)
+{
+	(void)pass_id;
+}
+
+void lam_glTimerEnd(GLuint pass_id)
+{
+	(void)pass_id;
+}
+
 /* -------------------------------------------------------------------------
  * Native 2D software canvas flush -> GL texture (for <canvas> 2D viewports)
  * ------------------------------------------------------------------------- */

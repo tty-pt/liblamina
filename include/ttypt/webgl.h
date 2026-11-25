@@ -370,6 +370,12 @@ void glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBindin
 __attribute__((import_module("webgl"), import_name("glCmdFlush")))
 void glCmdFlush(const uint32_t *buf, uint32_t word_count);
 
+__attribute__((import_module("webgl"), import_name("glTimerBegin")))
+void glTimerBegin(GLuint pass_id);
+
+__attribute__((import_module("webgl"), import_name("glTimerEnd")))
+void glTimerEnd(GLuint pass_id);
+
 #elif defined(LAM_WEBGL_NATIVE)
 
 typedef struct lam_webgl_surface lam_webgl_surface_t;
@@ -479,6 +485,8 @@ void lam_glBindBufferBase(GLenum target, GLuint index, GLuint buffer);
 GLuint lam_glGetUniformBlockIndex(GLuint program, const char *name, size_t len);
 void lam_glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBinding);
 void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count);
+void lam_glTimerBegin(GLuint pass_id);
+void lam_glTimerEnd(GLuint pass_id);
 
 #define glViewport                       lam_glViewport
 #define glClearColor                     lam_glClearColor
@@ -554,6 +562,8 @@ void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count);
 #define glGetUniformBlockIndex           lam_glGetUniformBlockIndex
 #define glUniformBlockBinding            lam_glUniformBlockBinding
 #define glCmdFlush                       lam_glCmdFlush
+#define glTimerBegin                     lam_glTimerBegin
+#define glTimerEnd                       lam_glTimerEnd
 
 #else
 
@@ -635,6 +645,8 @@ static inline void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) 
 static inline GLuint glGetUniformBlockIndex(GLuint program, const char *name, size_t len) { (void)program; (void)name; (void)len; return 0u; }
 static inline void glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBinding) { (void)program; (void)blockIndex; (void)blockBinding; }
 static inline void glCmdFlush(const uint32_t *buf, uint32_t word_count) { (void)buf; (void)word_count; }
+static inline void glTimerBegin(GLuint pass_id) { (void)pass_id; }
+static inline void glTimerEnd(GLuint pass_id) { (void)pass_id; }
 
 #endif
 

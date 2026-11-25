@@ -142,6 +142,50 @@ export function createWebGlBridge(root, getWasm) {
 
 	/* Optional runtime bridge profiler (disabled by default; zero allocations in hot path) */
 	let perfEnabled = !!(globalScope && globalScope.__webglPerfEnabled);
+	let timerExt = null;
+	let timerActiveQuery = null;
+	let timerActivePass = 0;
+	const timerQueryPool = [];
+	const timerInFlight = [];
+	const gpuPassStats = new Map();
+	let gpuTimerDisjoints = 0;
+
+	function resetGpuTimerQueries() {
+		timerActiveQuery = null;
+		timerActivePass = 0;
+		timerQueryPool.length = 0;
+		timerInFlight.length = 0;
+	}
+
+	function pollGpuTimers(c) {
+		if (!c || !timerExt || timerInFlight.length === 0) return;
+		const disjoint = !!c.getParameter(timerExt.GPU_DISJOINT_EXT);
+		if (disjoint) gpuTimerDisjoints++;
+		while (timerInFlight.length > 0) {
+			const item = timerInFlight[0];
+			const avail = c.getQueryParameter(item.query, c.QUERY_RESULT_AVAILABLE);
+			if (!avail) break;
+			timerInFlight.shift();
+			const ns = Number(c.getQueryParameter(item.query, c.QUERY_RESULT)) || 0;
+			if (!disjoint) {
+				let st = gpuPassStats.get(item.passId);
+				if (!st) {
+					st = { samples: 0, totalNs: 0, maxNs: 0, lastNs: 0 };
+					gpuPassStats.set(item.passId, st);
+				}
+				st.samples++;
+				st.totalNs += ns;
+				if (ns > st.maxNs) st.maxNs = ns;
+				st.lastNs = ns;
+			}
+			if (timerQueryPool.length < 64) {
+				timerQueryPool.push(item.query);
+			} else if (typeof c.deleteQuery === 'function') {
+				c.deleteQuery(item.query);
+			}
+		}
+	}
+
 	const perfStats = {
 		getGlCalls: 0,
 		domQueries: 0,
@@ -168,11 +212,29 @@ export function createWebGlBridge(root, getWasm) {
 			perfStats.blits = 0;
 			perfStats.cmdFlushes = 0;
 			perfStats.cmdOps = 0;
+			gpuPassStats.clear();
+			gpuTimerDisjoints = 0;
 		},
 		snapshot() {
+			if (gl && timerExt) pollGpuTimers(gl);
+			const gpuPasses = {};
+			for (const [id, st] of gpuPassStats.entries()) {
+				const avgNs = st.samples > 0 ? (st.totalNs / st.samples) : 0;
+				gpuPasses[id] = {
+					samples: st.samples,
+					avgMs: avgNs * 1e-6,
+					maxMs: st.maxNs * 1e-6,
+					lastMs: st.lastNs * 1e-6,
+					totalMs: st.totalNs * 1e-6
+				};
+			}
 			return {
 				enabled: perfEnabled,
 				...perfStats,
+				gpuTimerSupported: !!timerExt,
+				gpuTimerDisjoints,
+				gpuTimerInFlight: timerInFlight.length,
+				gpuPasses,
 				uniformLocsLen: uniformLocs.length - 1,
 				programsLen: programs.length - 1,
 				texturesLen: textures.length - 1
@@ -342,6 +404,7 @@ export function createWebGlBridge(root, getWasm) {
 	}
 
 	function rebuildContextResources(c) {
+		resetGpuTimerQueries();
 		for (let i = 1; i < shaderMeta.length; i++) {
 			const sm = shaderMeta[i];
 			if (!sm) { shaders[i] = null; continue; }
@@ -567,6 +630,9 @@ export function createWebGlBridge(root, getWasm) {
 					|| gl.getExtension('WEBKIT_EXT_texture_filter_anisotropic')
 					|| gl.getExtension('MOZ_EXT_texture_filter_anisotropic');
 				maxAniso = anisoExt ? (gl.getParameter(anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) || 1) : 1;
+				timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2') || null;
+			} else {
+				timerExt = null;
 			}
 			if (prevCanvas && prevCanvas !== canvas && gl) {
 				rebuildContextResources(gl);
@@ -587,9 +653,12 @@ export function createWebGlBridge(root, getWasm) {
 	let currentActiveTextureUnit = 0;
 	const boundTextures2D = new Array(32).fill(0);
 	const boundTexturesCube = new Array(32).fill(0);
+	const boundTextures2DArray = new Array(32).fill(0);
 
 	function boundTextureMap(target) {
-		return target === 0x8513 ? boundTexturesCube : boundTextures2D;
+		if (target === 0x8513) return boundTexturesCube;
+		if (target === 0x8C1A) return boundTextures2DArray;
+		return boundTextures2D;
 	}
 	function getBoundTextureId(target) {
 		return boundTextureMap(target)[currentActiveTextureUnit] || 0;
@@ -617,6 +686,8 @@ export function createWebGlBridge(root, getWasm) {
 			parallelCompileExt = undefined;
 			anisoExt = null;
 			maxAniso = 1;
+			timerExt = null;
+			resetGpuTimerQueries();
 			currentProgramId = 0;
 			currentBoundUniformBufferId = 0;
 			boundUniformBufferBases.clear();
@@ -624,6 +695,7 @@ export function createWebGlBridge(root, getWasm) {
 			currentActiveTextureUnit = 0;
 			boundTextures2D.fill(0);
 			boundTexturesCube.fill(0);
+			boundTextures2DArray.fill(0);
 			if (shaderWorker) {
 				try { shaderWorker.terminate(); } catch (_) {}
 				shaderWorker = null;
@@ -968,6 +1040,7 @@ export function createWebGlBridge(root, getWasm) {
 					for (let u = 0; u < 32; u++) {
 						if (boundTextures2D[u] === texId) boundTextures2D[u] = 0;
 						if (boundTexturesCube[u] === texId) boundTexturesCube[u] = 0;
+						if (boundTextures2DArray[u] === texId) boundTextures2DArray[u] = 0;
 					}
 				},
 				glBindTexture(target, texId) {
@@ -990,8 +1063,17 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const boundId = getBoundTextureId(target);
 					if (boundId && textureMeta[boundId]) {
-						textureMeta[boundId].target = target;
-						textureMeta[boundId].params.push([pname, param]);
+						const tm = textureMeta[boundId];
+						tm.target = target;
+						let replaced = false;
+						for (let i = 0; i < tm.params.length; i++) {
+							if (tm.params[i][0] === pname) {
+								tm.params[i][1] = param;
+								replaced = true;
+								break;
+							}
+						}
+						if (!replaced) tm.params.push([pname, param]);
 					}
 					if (!c) return;
 					if (pname === 0x84FE) {
@@ -1028,53 +1110,55 @@ export function createWebGlBridge(root, getWasm) {
 						c.texImage2D(target, lvl, internalformat, width, height, border, format, type, null);
 						return;
 					}
+					ensureMemViews(exports.memory);
 					const count = width * height;
+					let view;
+					let CopyCtor;
 					if (type === 0x1402) {
-						const view = new Int16Array(exports.memory.buffer, ptr, count);
-						if (tm) {
-							const copy = new Int16Array(view);
-							tm.target = target;
-							if (lvl === 0) {
-								tm.level = 0; tm.internalformat = internalformat;
-								tm.width = width; tm.height = height; tm.border = border; tm.format = format; tm.type = type;
-								tm.unpackAlignment = currentUnpackAlignment;
-								tm.pixels = copy;
-							}
-							tm.mips[lvl] = { target, level: lvl, internalformat, width, height, border, format, type, unpackAlignment: currentUnpackAlignment, pixels: copy };
-						}
-						c.texImage2D(target, lvl, internalformat, width, height, border, format, type, view);
+						view = ((ptr & 1) === 0)
+							? memI16.subarray(ptr >>> 1, (ptr >>> 1) + count)
+							: new Int16Array(exports.memory.buffer.slice(ptr, ptr + count * 2));
+						CopyCtor = Int16Array;
 					} else if (type === 0x1406) {
 						const ch = (format === 0x1903 || format === 0x1902 || format === 0x8D94) ? 1 : 4;
-						const view = new Float32Array(exports.memory.buffer, ptr, count * ch);
-						if (tm) {
-							const copy = new Float32Array(view);
-							tm.target = target;
-							if (lvl === 0) {
-								tm.level = 0; tm.internalformat = internalformat;
-								tm.width = width; tm.height = height; tm.border = border; tm.format = format; tm.type = type;
-								tm.unpackAlignment = currentUnpackAlignment;
-								tm.pixels = copy;
-							}
-							tm.mips[lvl] = { target, level: lvl, internalformat, width, height, border, format, type, unpackAlignment: currentUnpackAlignment, pixels: copy };
-						}
-						c.texImage2D(target, lvl, internalformat, width, height, border, format, type, view);
+						const len = count * ch;
+						view = ((ptr & 3) === 0)
+							? memF32.subarray(ptr >>> 2, (ptr >>> 2) + len)
+							: new Float32Array(exports.memory.buffer.slice(ptr, ptr + len * 4));
+						CopyCtor = Float32Array;
 					} else {
 						const bpp = (format === 0x1903 || format === 0x8D94 || internalformat === 0x8229) ? 1 : (format === 0x1907 ? 3 : 4);
 						const byteLen = count * bpp;
-						const view = new Uint8Array(exports.memory.buffer, ptr, byteLen);
-						if (tm) {
-							const copy = new Uint8Array(view);
-							tm.target = target;
-							if (lvl === 0) {
-								tm.level = 0; tm.internalformat = internalformat;
-								tm.width = width; tm.height = height; tm.border = border; tm.format = format; tm.type = type;
-								tm.unpackAlignment = currentUnpackAlignment;
-								tm.pixels = copy;
-							}
+						view = memU8.subarray(ptr, ptr + byteLen);
+						CopyCtor = Uint8Array;
+					}
+					if (tm) {
+						const prevMip = tm.mips[lvl];
+						let copy;
+						if (prevMip && prevMip.pixels && prevMip.pixels instanceof CopyCtor && prevMip.pixels.length === view.length) {
+							copy = prevMip.pixels;
+							copy.set(view);
+							prevMip.target = target;
+							prevMip.internalformat = internalformat;
+							prevMip.width = width;
+							prevMip.height = height;
+							prevMip.border = border;
+							prevMip.format = format;
+							prevMip.type = type;
+							prevMip.unpackAlignment = currentUnpackAlignment;
+						} else {
+							copy = new CopyCtor(view);
 							tm.mips[lvl] = { target, level: lvl, internalformat, width, height, border, format, type, unpackAlignment: currentUnpackAlignment, pixels: copy };
 						}
-						c.texImage2D(target, lvl, internalformat, width, height, border, format, type, view);
+						tm.target = target;
+						if (lvl === 0) {
+							tm.level = 0; tm.internalformat = internalformat;
+							tm.width = width; tm.height = height; tm.border = border; tm.format = format; tm.type = type;
+							tm.unpackAlignment = currentUnpackAlignment;
+							tm.pixels = copy;
+						}
 					}
+					c.texImage2D(target, lvl, internalformat, width, height, border, format, type, view);
 				},
 				glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixelsPtr) {
 					if (perfEnabled) perfStats.texUploads++;
@@ -1116,16 +1200,23 @@ export function createWebGlBridge(root, getWasm) {
 						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, null);
 						return;
 					}
+					ensureMemViews(exports.memory);
+					const count = width * height * depth;
 					if (type === 0x1402) {
-						let view;
-						if ((ptr & 1) === 0) {
-							view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
-						} else {
-							view = new Int16Array(exports.memory.buffer.slice(ptr, ptr + width * height * depth * 2));
-						}
+						const view = ((ptr & 1) === 0)
+							? memI16.subarray(ptr >>> 1, (ptr >>> 1) + count)
+							: new Int16Array(exports.memory.buffer.slice(ptr, ptr + count * 2));
+						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, view);
+					} else if (type === 0x1406) {
+						const ch = (format === 0x1903 || format === 0x1902 || format === 0x8D94) ? 1 : 4;
+						const len = count * ch;
+						const view = ((ptr & 3) === 0)
+							? memF32.subarray(ptr >>> 2, (ptr >>> 2) + len)
+							: new Float32Array(exports.memory.buffer.slice(ptr, ptr + len * 4));
 						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, view);
 					} else {
-						const view = new Uint8Array(exports.memory.buffer, ptr, width * height * depth * 4);
+						const bpp = (format === 0x1903 || format === 0x8D94 || internalformat === 0x8229) ? 1 : (format === 0x1907 ? 3 : 4);
+						const view = memU8.subarray(ptr, ptr + count * bpp);
 						c.texImage3D(target, level, internalformat, width, height, depth, border, format, type, view);
 					}
 				},
@@ -1135,16 +1226,23 @@ export function createWebGlBridge(root, getWasm) {
 					const exports = getWasm();
 					if (!c || typeof c.texSubImage3D !== 'function' || !exports || !exports.memory || !pixels) return;
 					const ptr = pixels >>> 0;
+					ensureMemViews(exports.memory);
+					const count = width * height * depth;
 					if (type === 0x1402) {
-						let view;
-						if ((ptr & 1) === 0) {
-							view = new Int16Array(exports.memory.buffer, ptr, width * height * depth);
-						} else {
-							view = new Int16Array(exports.memory.buffer.slice(ptr, ptr + width * height * depth * 2));
-						}
+						const view = ((ptr & 1) === 0)
+							? memI16.subarray(ptr >>> 1, (ptr >>> 1) + count)
+							: new Int16Array(exports.memory.buffer.slice(ptr, ptr + count * 2));
+						c.texSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
+					} else if (type === 0x1406) {
+						const ch = (format === 0x1903 || format === 0x1902 || format === 0x8D94) ? 1 : 4;
+						const len = count * ch;
+						const view = ((ptr & 3) === 0)
+							? memF32.subarray(ptr >>> 2, (ptr >>> 2) + len)
+							: new Float32Array(exports.memory.buffer.slice(ptr, ptr + len * 4));
 						c.texSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
 					} else {
-						const view = new Uint8Array(exports.memory.buffer, ptr, width * height * depth * 4);
+						const bpp = (format === 0x1903 || format === 0x8D94) ? 1 : (format === 0x1907 ? 3 : 4);
+						const view = memU8.subarray(ptr, ptr + count * bpp);
 						c.texSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
 					}
 				},
@@ -1674,6 +1772,30 @@ export function createWebGlBridge(root, getWasm) {
 					}
 					if (perfEnabled) perfStats.cmdOps += ops;
 					if (drew && glCanvas) glCanvas.__stele_dirty = true;
+				},
+				glTimerBegin(passId) {
+					if (!perfEnabled || !timerExt || timerActiveQuery) return;
+					const c = getGl();
+					if (!c || typeof c.createQuery !== 'function') return;
+					pollGpuTimers(c);
+					const q = timerQueryPool.length > 0 ? timerQueryPool.pop() : c.createQuery();
+					if (!q) return;
+					c.beginQuery(timerExt.TIME_ELAPSED_EXT, q);
+					timerActiveQuery = q;
+					timerActivePass = passId >>> 0;
+				},
+				glTimerEnd() {
+					if (!timerActiveQuery) return;
+					const c = getGl();
+					if (!c || !timerExt) {
+						timerActiveQuery = null;
+						timerActivePass = 0;
+						return;
+					}
+					c.endQuery(timerExt.TIME_ELAPSED_EXT);
+					timerInFlight.push({ passId: timerActivePass, query: timerActiveQuery });
+					timerActiveQuery = null;
+					timerActivePass = 0;
 				}
 			};
 		}

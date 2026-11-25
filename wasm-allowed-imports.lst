@@ -85,3 +85,5 @@ webgl.glBindBufferBase
 webgl.glGetUniformBlockIndex
 webgl.glUniformBlockBinding
 webgl.glCmdFlush
+webgl.glTimerBegin
+webgl.glTimerEnd
