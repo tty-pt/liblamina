@@ -760,6 +760,159 @@ void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 	glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
 }
 
+void lam_glBindBufferBase(GLenum target, GLuint index, GLuint buffer)
+{
+	glBindBufferBase(target, index, buffer);
+}
+
+GLuint lam_glGetUniformBlockIndex(GLuint program, const char *name, size_t len)
+{
+	char stack[256], *heap = NULL;
+	const char *z = copy_slice_z(name, len, stack, sizeof(stack), &heap);
+	GLuint idx = glGetUniformBlockIndex(program, z);
+	free(heap);
+	return idx;
+}
+
+void lam_glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBinding)
+{
+	glUniformBlockBinding(program, blockIndex, blockBinding);
+}
+
+static inline GLfloat lam_bits_f32(uint32_t u)
+{
+	union { uint32_t u; GLfloat f; } v;
+	v.u = u;
+	return v.f;
+}
+
+void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count)
+{
+	if (!buf || !word_count)
+		return;
+	uint32_t i = 0;
+	while (i < word_count) {
+		uint32_t op = buf[i++];
+		switch (op) {
+		case 0u: /* NOP */
+			break;
+		case 1u: /* USE_PROGRAM */
+			if (i + 1u > word_count) return;
+			glUseProgram((GLuint)buf[i++]);
+			break;
+		case 2u: /* ACTIVE_TEXTURE */
+			if (i + 1u > word_count) return;
+			glActiveTexture((GLenum)buf[i++]);
+			break;
+		case 3u: /* BIND_TEXTURE */
+			if (i + 2u > word_count) return;
+			glBindTexture((GLenum)buf[i], (GLuint)buf[i + 1u]);
+			i += 2u;
+			break;
+		case 4u: /* BIND_BUFFER */
+			if (i + 2u > word_count) return;
+			glBindBuffer((GLenum)buf[i], (GLuint)buf[i + 1u]);
+			i += 2u;
+			break;
+		case 5u: /* ENABLE */
+			if (i + 1u > word_count) return;
+			glEnable((GLenum)buf[i++]);
+			break;
+		case 6u: /* DISABLE */
+			if (i + 1u > word_count) return;
+			glDisable((GLenum)buf[i++]);
+			break;
+		case 7u: /* DEPTH_MASK */
+			if (i + 1u > word_count) return;
+			glDepthMask((GLboolean)(buf[i++] ? GL_TRUE : GL_FALSE));
+			break;
+		case 8u: /* BLEND_FUNC */
+			if (i + 2u > word_count) return;
+			glBlendFunc((GLenum)buf[i], (GLenum)buf[i + 1u]);
+			i += 2u;
+			break;
+		case 9u: /* UNIFORM1I */
+			if (i + 2u > word_count) return;
+			glUniform1i((GLint)buf[i], (GLint)buf[i + 1u]);
+			i += 2u;
+			break;
+		case 10u: /* UNIFORM1F */
+			if (i + 2u > word_count) return;
+			glUniform1f((GLint)buf[i], lam_bits_f32(buf[i + 1u]));
+			i += 2u;
+			break;
+		case 11u: /* UNIFORM2F */
+			if (i + 3u > word_count) return;
+			glUniform2f((GLint)buf[i], lam_bits_f32(buf[i + 1u]), lam_bits_f32(buf[i + 2u]));
+			i += 3u;
+			break;
+		case 12u: /* UNIFORM3F */
+			if (i + 4u > word_count) return;
+			glUniform3f((GLint)buf[i], lam_bits_f32(buf[i + 1u]),
+			            lam_bits_f32(buf[i + 2u]), lam_bits_f32(buf[i + 3u]));
+			i += 4u;
+			break;
+		case 13u: /* UNIFORM4F */
+			if (i + 5u > word_count) return;
+			glUniform4f((GLint)buf[i], lam_bits_f32(buf[i + 1u]),
+			            lam_bits_f32(buf[i + 2u]), lam_bits_f32(buf[i + 3u]),
+			            lam_bits_f32(buf[i + 4u]));
+			i += 5u;
+			break;
+		case 14u: /* UNIFORM_MAT4 */ {
+			if (i + 18u > word_count) return;
+			GLint loc = (GLint)buf[i];
+			GLboolean tr = (GLboolean)(buf[i + 1u] ? GL_TRUE : GL_FALSE);
+			GLfloat m[16];
+			for (int k = 0; k < 16; k++)
+				m[k] = lam_bits_f32(buf[i + 2u + (uint32_t)k]);
+			glUniformMatrix4fv(loc, 1, tr, m);
+			i += 18u;
+			break;
+		}
+		case 15u: /* VERTEX_ATTRIB_PTR */
+			if (i + 6u > word_count) return;
+			glVertexAttribPointer((GLuint)buf[i], (GLint)buf[i + 1u], (GLenum)buf[i + 2u],
+			                      (GLboolean)(buf[i + 3u] ? GL_TRUE : GL_FALSE),
+			                      (GLsizei)buf[i + 4u], (const void *)(uintptr_t)buf[i + 5u]);
+			i += 6u;
+			break;
+		case 16u: /* DRAW_ELEMENTS */
+			if (i + 4u > word_count) return;
+			glDrawElements((GLenum)buf[i], (GLsizei)buf[i + 1u], (GLenum)buf[i + 2u],
+			               (const void *)(uintptr_t)buf[i + 3u]);
+			i += 4u;
+			break;
+		case 17u: /* DRAW_ELEMENTS_INSTANCED */
+			if (i + 5u > word_count) return;
+			glDrawElementsInstanced((GLenum)buf[i], (GLsizei)buf[i + 1u], (GLenum)buf[i + 2u],
+			                        (const void *)(uintptr_t)buf[i + 3u], (GLsizei)buf[i + 4u]);
+			i += 5u;
+			break;
+		case 18u: /* DRAW_ARRAYS */
+			if (i + 3u > word_count) return;
+			glDrawArrays((GLenum)buf[i], (GLint)buf[i + 1u], (GLsizei)buf[i + 2u]);
+			i += 3u;
+			break;
+		case 19u: /* ENABLE_VAA */
+			if (i + 1u > word_count) return;
+			glEnableVertexAttribArray((GLuint)buf[i++]);
+			break;
+		case 20u: /* DISABLE_VAA */
+			if (i + 1u > word_count) return;
+			glDisableVertexAttribArray((GLuint)buf[i++]);
+			break;
+		case 21u: /* VERTEX_ATTRIB_DIVISOR */
+			if (i + 2u > word_count) return;
+			glVertexAttribDivisor((GLuint)buf[i], (GLuint)buf[i + 1u]);
+			i += 2u;
+			break;
+		default:
+			return;
+		}
+	}
+}
+
 /* -------------------------------------------------------------------------
  * Native 2D software canvas flush -> GL texture (for <canvas> 2D viewports)
  * ------------------------------------------------------------------------- */

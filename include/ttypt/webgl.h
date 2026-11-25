@@ -108,6 +108,34 @@ typedef unsigned int GLbitfield;
 #define GL_REPLACE                0x1E01
 
 #define GL_POLYGON_OFFSET_FILL    0x8037
+#define GL_UNIFORM_BUFFER         0x8A11
+#define GL_INVALID_INDEX          0xFFFFFFFFu
+
+/* Flat uint32 command ring buffer opcodes for glCmdFlush() */
+enum lam_gl_cmd_op {
+	LAM_GL_CMD_NOP                     = 0,  /* [op] */
+	LAM_GL_CMD_USE_PROGRAM             = 1,  /* [op, prog] */
+	LAM_GL_CMD_ACTIVE_TEXTURE          = 2,  /* [op, unit_enum] */
+	LAM_GL_CMD_BIND_TEXTURE            = 3,  /* [op, target, tex] */
+	LAM_GL_CMD_BIND_BUFFER             = 4,  /* [op, target, buf] */
+	LAM_GL_CMD_ENABLE                  = 5,  /* [op, cap] */
+	LAM_GL_CMD_DISABLE                 = 6,  /* [op, cap] */
+	LAM_GL_CMD_DEPTH_MASK              = 7,  /* [op, flag] */
+	LAM_GL_CMD_BLEND_FUNC              = 8,  /* [op, sfactor, dfactor] */
+	LAM_GL_CMD_UNIFORM1I               = 9,  /* [op, loc, i0] */
+	LAM_GL_CMD_UNIFORM1F               = 10, /* [op, loc, f0] */
+	LAM_GL_CMD_UNIFORM2F               = 11, /* [op, loc, f0, f1] */
+	LAM_GL_CMD_UNIFORM3F               = 12, /* [op, loc, f0, f1, f2] */
+	LAM_GL_CMD_UNIFORM4F               = 13, /* [op, loc, f0, f1, f2, f3] */
+	LAM_GL_CMD_UNIFORM_MAT4            = 14, /* [op, loc, transpose, f0..f15] */
+	LAM_GL_CMD_VERTEX_ATTRIB_PTR       = 15, /* [op, index, size, type, norm, stride, offset] */
+	LAM_GL_CMD_DRAW_ELEMENTS           = 16, /* [op, mode, count, type, offset] */
+	LAM_GL_CMD_DRAW_ELEMENTS_INSTANCED = 17, /* [op, mode, count, type, offset, instances] */
+	LAM_GL_CMD_DRAW_ARRAYS             = 18, /* [op, mode, first, count] */
+	LAM_GL_CMD_ENABLE_VAA              = 19, /* [op, index] */
+	LAM_GL_CMD_DISABLE_VAA             = 20, /* [op, index] */
+	LAM_GL_CMD_VERTEX_ATTRIB_DIVISOR   = 21  /* [op, index, divisor] */
+};
 
 #ifdef __wasm__
 __attribute__((import_module("webgl"), import_name("glViewport")))
@@ -330,6 +358,18 @@ void glClearStencil(GLint s);
 __attribute__((import_module("webgl"), import_name("glBlitFramebuffer")))
 void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter);
 
+__attribute__((import_module("webgl"), import_name("glBindBufferBase")))
+void glBindBufferBase(GLenum target, GLuint index, GLuint buffer);
+
+__attribute__((import_module("webgl"), import_name("glGetUniformBlockIndex")))
+GLuint glGetUniformBlockIndex(GLuint program, const char *name, size_t len);
+
+__attribute__((import_module("webgl"), import_name("glUniformBlockBinding")))
+void glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBinding);
+
+__attribute__((import_module("webgl"), import_name("glCmdFlush")))
+void glCmdFlush(const uint32_t *buf, uint32_t word_count);
+
 #elif defined(LAM_WEBGL_NATIVE)
 
 typedef struct lam_webgl_surface lam_webgl_surface_t;
@@ -435,6 +475,10 @@ void lam_glClearStencil(GLint s);
 void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1,
                            GLint dx0, GLint dy0, GLint dx1, GLint dy1,
                            GLbitfield mask, GLenum filter);
+void lam_glBindBufferBase(GLenum target, GLuint index, GLuint buffer);
+GLuint lam_glGetUniformBlockIndex(GLuint program, const char *name, size_t len);
+void lam_glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBinding);
+void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count);
 
 #define glViewport                       lam_glViewport
 #define glClearColor                     lam_glClearColor
@@ -506,6 +550,10 @@ void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 #define glStencilMask                    lam_glStencilMask
 #define glClearStencil                   lam_glClearStencil
 #define glBlitFramebuffer                lam_glBlitFramebuffer
+#define glBindBufferBase                 lam_glBindBufferBase
+#define glGetUniformBlockIndex           lam_glGetUniformBlockIndex
+#define glUniformBlockBinding            lam_glUniformBlockBinding
+#define glCmdFlush                       lam_glCmdFlush
 
 #else
 
@@ -583,8 +631,248 @@ static inline void glStencilOp(GLenum sfail, GLenum dpfail, GLenum dppass) { (vo
 static inline void glStencilMask(GLuint mask) { (void)mask; }
 static inline void glClearStencil(GLint s) { (void)s; }
 static inline void glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1, GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter) { (void)sx0; (void)sy0; (void)sx1; (void)sy1; (void)dx0; (void)dy0; (void)dx1; (void)dy1; (void)mask; (void)filter; }
+static inline void glBindBufferBase(GLenum target, GLuint index, GLuint buffer) { (void)target; (void)index; (void)buffer; }
+static inline GLuint glGetUniformBlockIndex(GLuint program, const char *name, size_t len) { (void)program; (void)name; (void)len; return 0u; }
+static inline void glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBinding) { (void)program; (void)blockIndex; (void)blockBinding; }
+static inline void glCmdFlush(const uint32_t *buf, uint32_t word_count) { (void)buf; (void)word_count; }
 
 #endif
+
+/* -------------------------------------------------------------------------
+ * Compact inline flat uint32 command ring encoder (zero-allocation batching)
+ * ------------------------------------------------------------------------- */
+typedef struct {
+	uint32_t *words;
+	uint32_t  cap;
+	uint32_t  len;
+} lam_gl_cmd_buf_t;
+
+static inline uint32_t lam_gl_f32_bits(GLfloat f)
+{
+	union { GLfloat f; uint32_t u; } v;
+	v.f = f;
+	return v.u;
+}
+
+static inline void lam_gl_cmd_flush(lam_gl_cmd_buf_t *cb)
+{
+	if (cb->len > 0u) {
+		glCmdFlush(cb->words, cb->len);
+		cb->len = 0u;
+	}
+}
+
+static __attribute__((noinline, unused)) uint32_t *
+lam_gl_cmd_alloc(lam_gl_cmd_buf_t *cb, uint32_t need)
+{
+	if (cb->len + need > cb->cap) {
+		if (cb->len > 0u) {
+			glCmdFlush(cb->words, cb->len);
+			cb->len = 0u;
+		}
+	}
+	uint32_t *p = cb->words + cb->len;
+	cb->len += need;
+	return p;
+}
+
+static inline void lam_gl_cmd_reserve(lam_gl_cmd_buf_t *cb, uint32_t need)
+{
+	if (cb->len + need > cb->cap)
+		lam_gl_cmd_flush(cb);
+}
+
+static inline void lam_gl_cmd_use_program(lam_gl_cmd_buf_t *cb, GLuint prog)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_USE_PROGRAM;
+	p[1] = (uint32_t)prog;
+}
+
+static inline void lam_gl_cmd_active_texture(lam_gl_cmd_buf_t *cb, GLenum unit)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_ACTIVE_TEXTURE;
+	p[1] = (uint32_t)unit;
+}
+
+static inline void lam_gl_cmd_bind_texture(lam_gl_cmd_buf_t *cb, GLenum target, GLuint tex)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 3u);
+	p[0] = LAM_GL_CMD_BIND_TEXTURE;
+	p[1] = (uint32_t)target;
+	p[2] = (uint32_t)tex;
+}
+
+static inline void lam_gl_cmd_bind_buffer(lam_gl_cmd_buf_t *cb, GLenum target, GLuint buf)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 3u);
+	p[0] = LAM_GL_CMD_BIND_BUFFER;
+	p[1] = (uint32_t)target;
+	p[2] = (uint32_t)buf;
+}
+
+static inline void lam_gl_cmd_enable(lam_gl_cmd_buf_t *cb, GLenum cap)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_ENABLE;
+	p[1] = (uint32_t)cap;
+}
+
+static inline void lam_gl_cmd_disable(lam_gl_cmd_buf_t *cb, GLenum cap)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_DISABLE;
+	p[1] = (uint32_t)cap;
+}
+
+static inline void lam_gl_cmd_depth_mask(lam_gl_cmd_buf_t *cb, GLboolean flag)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_DEPTH_MASK;
+	p[1] = (uint32_t)(flag ? 1u : 0u);
+}
+
+static inline void lam_gl_cmd_blend_func(lam_gl_cmd_buf_t *cb, GLenum sf, GLenum df)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 3u);
+	p[0] = LAM_GL_CMD_BLEND_FUNC;
+	p[1] = (uint32_t)sf;
+	p[2] = (uint32_t)df;
+}
+
+static inline void lam_gl_cmd_uniform1i(lam_gl_cmd_buf_t *cb, GLint loc, GLint v0)
+{
+	if (loc < 0) return;
+	uint32_t *p = lam_gl_cmd_alloc(cb, 3u);
+	p[0] = LAM_GL_CMD_UNIFORM1I;
+	p[1] = (uint32_t)loc;
+	p[2] = (uint32_t)v0;
+}
+
+static inline void lam_gl_cmd_uniform1f(lam_gl_cmd_buf_t *cb, GLint loc, GLfloat v0)
+{
+	if (loc < 0) return;
+	uint32_t *p = lam_gl_cmd_alloc(cb, 3u);
+	p[0] = LAM_GL_CMD_UNIFORM1F;
+	p[1] = (uint32_t)loc;
+	p[2] = lam_gl_f32_bits(v0);
+}
+
+static inline void lam_gl_cmd_uniform2f(lam_gl_cmd_buf_t *cb, GLint loc, GLfloat v0, GLfloat v1)
+{
+	if (loc < 0) return;
+	uint32_t *p = lam_gl_cmd_alloc(cb, 4u);
+	p[0] = LAM_GL_CMD_UNIFORM2F;
+	p[1] = (uint32_t)loc;
+	p[2] = lam_gl_f32_bits(v0);
+	p[3] = lam_gl_f32_bits(v1);
+}
+
+static inline void lam_gl_cmd_uniform3f(lam_gl_cmd_buf_t *cb, GLint loc, GLfloat v0, GLfloat v1, GLfloat v2)
+{
+	if (loc < 0) return;
+	uint32_t *p = lam_gl_cmd_alloc(cb, 5u);
+	p[0] = LAM_GL_CMD_UNIFORM3F;
+	p[1] = (uint32_t)loc;
+	p[2] = lam_gl_f32_bits(v0);
+	p[3] = lam_gl_f32_bits(v1);
+	p[4] = lam_gl_f32_bits(v2);
+}
+
+static inline void lam_gl_cmd_uniform4f(lam_gl_cmd_buf_t *cb, GLint loc, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3)
+{
+	if (loc < 0) return;
+	uint32_t *p = lam_gl_cmd_alloc(cb, 6u);
+	p[0] = LAM_GL_CMD_UNIFORM4F;
+	p[1] = (uint32_t)loc;
+	p[2] = lam_gl_f32_bits(v0);
+	p[3] = lam_gl_f32_bits(v1);
+	p[4] = lam_gl_f32_bits(v2);
+	p[5] = lam_gl_f32_bits(v3);
+}
+
+static __attribute__((noinline, unused)) void
+lam_gl_cmd_uniform_mat4(lam_gl_cmd_buf_t *cb, GLint loc, GLboolean transpose, const GLfloat m[16])
+{
+	if (loc < 0) return;
+	uint32_t *p = lam_gl_cmd_alloc(cb, 19u);
+	p[0] = LAM_GL_CMD_UNIFORM_MAT4;
+	p[1] = (uint32_t)loc;
+	p[2] = (uint32_t)(transpose ? 1u : 0u);
+	for (int k = 0; k < 16; k++)
+		p[3 + k] = lam_gl_f32_bits(m[k]);
+}
+
+static __attribute__((noinline, unused)) void
+lam_gl_cmd_vertex_attrib_ptr(lam_gl_cmd_buf_t *cb, GLuint index, GLint size,
+                             GLenum type, GLboolean normalized,
+                             GLsizei stride, size_t offset)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 7u);
+	p[0] = LAM_GL_CMD_VERTEX_ATTRIB_PTR;
+	p[1] = (uint32_t)index;
+	p[2] = (uint32_t)size;
+	p[3] = (uint32_t)type;
+	p[4] = (uint32_t)(normalized ? 1u : 0u);
+	p[5] = (uint32_t)stride;
+	p[6] = (uint32_t)offset;
+}
+
+static inline void lam_gl_cmd_draw_elements(lam_gl_cmd_buf_t *cb, GLenum mode, GLsizei count,
+                                            GLenum type, size_t offset)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 5u);
+	p[0] = LAM_GL_CMD_DRAW_ELEMENTS;
+	p[1] = (uint32_t)mode;
+	p[2] = (uint32_t)count;
+	p[3] = (uint32_t)type;
+	p[4] = (uint32_t)offset;
+}
+
+static inline void lam_gl_cmd_draw_elements_instanced(lam_gl_cmd_buf_t *cb, GLenum mode,
+                                                      GLsizei count, GLenum type,
+                                                      size_t offset, GLsizei instances)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 6u);
+	p[0] = LAM_GL_CMD_DRAW_ELEMENTS_INSTANCED;
+	p[1] = (uint32_t)mode;
+	p[2] = (uint32_t)count;
+	p[3] = (uint32_t)type;
+	p[4] = (uint32_t)offset;
+	p[5] = (uint32_t)instances;
+}
+
+static inline void lam_gl_cmd_draw_arrays(lam_gl_cmd_buf_t *cb, GLenum mode, GLint first, GLsizei count)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 4u);
+	p[0] = LAM_GL_CMD_DRAW_ARRAYS;
+	p[1] = (uint32_t)mode;
+	p[2] = (uint32_t)first;
+	p[3] = (uint32_t)count;
+}
+
+static inline void lam_gl_cmd_enable_vaa(lam_gl_cmd_buf_t *cb, GLuint index)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_ENABLE_VAA;
+	p[1] = (uint32_t)index;
+}
+
+static inline void lam_gl_cmd_disable_vaa(lam_gl_cmd_buf_t *cb, GLuint index)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_DISABLE_VAA;
+	p[1] = (uint32_t)index;
+}
+
+static inline void lam_gl_cmd_vertex_attrib_divisor(lam_gl_cmd_buf_t *cb, GLuint index, GLuint divisor)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 3u);
+	p[0] = LAM_GL_CMD_VERTEX_ATTRIB_DIVISOR;
+	p[1] = (uint32_t)index;
+	p[2] = (uint32_t)divisor;
+}
 
 #ifdef __cplusplus
 }

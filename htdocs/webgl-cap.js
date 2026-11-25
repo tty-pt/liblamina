@@ -150,7 +150,9 @@ export function createWebGlBridge(root, getWasm) {
 		texUploads: 0,
 		bufferUploads: 0,
 		draws: 0,
-		blits: 0
+		blits: 0,
+		cmdFlushes: 0,
+		cmdOps: 0
 	};
 	const perfApi = {
 		enable(v) { perfEnabled = !!v; },
@@ -164,6 +166,8 @@ export function createWebGlBridge(root, getWasm) {
 			perfStats.bufferUploads = 0;
 			perfStats.draws = 0;
 			perfStats.blits = 0;
+			perfStats.cmdFlushes = 0;
+			perfStats.cmdOps = 0;
 		},
 		snapshot() {
 			return {
@@ -197,6 +201,14 @@ export function createWebGlBridge(root, getWasm) {
 			const um = uniformMeta[i];
 			if (um && um.programId === programId) {
 				uniformLocs[i] = c.getUniformLocation(p, um.name);
+			}
+		}
+		if (pm.uboBindings && pm.uboBindings.length > 0 && typeof c.getUniformBlockIndex === 'function' && typeof c.uniformBlockBinding === 'function') {
+			for (const [bname, binding] of pm.uboBindings) {
+				const idx = c.getUniformBlockIndex(p, bname);
+				if (idx !== 0xFFFFFFFF && idx !== undefined) {
+					c.uniformBlockBinding(p, idx, binding);
+				}
 			}
 		}
 	}
@@ -488,6 +500,14 @@ export function createWebGlBridge(root, getWasm) {
 		}
 		c.bindBuffer(c.ARRAY_BUFFER, currentBoundArrayBufferId > 0 ? (buffers[currentBoundArrayBufferId] || null) : null);
 		c.bindBuffer(c.ELEMENT_ARRAY_BUFFER, currentBoundElementBufferId > 0 ? (buffers[currentBoundElementBufferId] || null) : null);
+		if (typeof c.bindBufferBase === 'function') {
+			if (currentBoundUniformBufferId > 0) {
+				c.bindBuffer(0x8A11, buffers[currentBoundUniformBufferId] || null);
+			}
+			for (const [idx, bid] of boundUniformBufferBases.entries()) {
+				c.bindBufferBase(0x8A11, idx, bid > 0 ? (buffers[bid] || null) : null);
+			}
+		}
 		if (currentProgramId > 0) {
 			const p = programs[currentProgramId];
 			const pm = programMeta[currentProgramId];
@@ -500,6 +520,8 @@ export function createWebGlBridge(root, getWasm) {
 	let cachedBuf = null;
 	let memU8 = null;
 	let memI16 = null;
+	let memI32 = null;
+	let memU32 = null;
 	let memF32 = null;
 
 	function ensureMemViews(memory) {
@@ -508,6 +530,8 @@ export function createWebGlBridge(root, getWasm) {
 			cachedBuf = buf;
 			memU8 = new Uint8Array(buf);
 			memI16 = new Int16Array(buf);
+			memI32 = new Int32Array(buf);
+			memU32 = new Uint32Array(buf);
 			memF32 = new Float32Array(buf);
 		}
 	}
@@ -558,6 +582,8 @@ export function createWebGlBridge(root, getWasm) {
 
 	let currentBoundArrayBufferId = 0;
 	let currentBoundElementBufferId = 0;
+	let currentBoundUniformBufferId = 0;
+	const boundUniformBufferBases = new Map();
 	let currentActiveTextureUnit = 0;
 	const boundTextures2D = new Array(32).fill(0);
 	const boundTexturesCube = new Array(32).fill(0);
@@ -585,11 +611,15 @@ export function createWebGlBridge(root, getWasm) {
 			cachedBuf = null;
 			memU8 = null;
 			memI16 = null;
+			memI32 = null;
+			memU32 = null;
 			memF32 = null;
 			parallelCompileExt = undefined;
 			anisoExt = null;
 			maxAniso = 1;
 			currentProgramId = 0;
+			currentBoundUniformBufferId = 0;
+			boundUniformBufferBases.clear();
 			currentUnpackAlignment = 4;
 			currentActiveTextureUnit = 0;
 			boundTextures2D.fill(0);
@@ -714,6 +744,8 @@ export function createWebGlBridge(root, getWasm) {
 					programMeta.push({
 						shaders: [],
 						attribBinds: [],
+						uboBlockNames: new Map(),
+						uboBindings: [],
 						linked: false,
 						linkedProgram: null,
 						workerCompiling: false,
@@ -862,6 +894,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					if (target === 0x8892) currentBoundArrayBufferId = bufferId;
 					else if (target === 0x8893) currentBoundElementBufferId = bufferId;
+					else if (target === 0x8A11) currentBoundUniformBufferId = bufferId;
 					const b = buffers[bufferId];
 					if (c) c.bindBuffer(target, b || null);
 				},
@@ -870,7 +903,7 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory) return;
-					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : 0);
+					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : (target === 0x8A11 ? currentBoundUniformBufferId : 0));
 					const uptr = dataPtr >>> 0;
 					const usize = size >>> 0;
 					if (!uptr) {
@@ -902,7 +935,7 @@ export function createWebGlBridge(root, getWasm) {
 					const uptr = dataPtr >>> 0;
 					if (!uptr || !usize) return;
 					ensureMemViews(exports.memory);
-					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : 0);
+					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : (target === 0x8A11 ? currentBoundUniformBufferId : 0));
 					if (bid && bufferMeta[bid] && bufferMeta[bid].data) {
 						const dst = bufferMeta[bid].data;
 						if (uoff + usize <= dst.byteLength) {
@@ -1385,6 +1418,262 @@ export function createWebGlBridge(root, getWasm) {
 						c.blitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
 						if (glCanvas) glCanvas.__stele_dirty = true;
 					}
+				},
+				glBindBufferBase(target, index, bufferId) {
+					const c = getGl();
+					const idx = index >>> 0;
+					const bid = bufferId | 0;
+					if (target === 0x8A11) {
+						currentBoundUniformBufferId = bid;
+						boundUniformBufferBases.set(idx, bid);
+					}
+					if (c && typeof c.bindBufferBase === 'function') {
+						c.bindBufferBase(target, idx, bid > 0 ? (buffers[bid] || null) : null);
+					}
+				},
+				glGetUniformBlockIndex(programId, namePtr, nameLen) {
+					const c = getGl();
+					const exports = getWasm();
+					if (!c || !exports || !exports.memory || typeof c.getUniformBlockIndex !== 'function') return 0xFFFFFFFF;
+					const p = programs[programId];
+					if (!p) return 0xFFFFFFFF;
+					const name = readStr(exports.memory, namePtr, nameLen);
+					const idx = c.getUniformBlockIndex(p, name);
+					if (idx !== 0xFFFFFFFF && idx !== undefined && programMeta[programId]) {
+						programMeta[programId].uboBlockNames.set(idx >>> 0, name);
+					}
+					return (idx === undefined ? 0xFFFFFFFF : idx) >>> 0;
+				},
+				glUniformBlockBinding(programId, blockIndex, blockBinding) {
+					const c = getGl();
+					const p = programs[programId];
+					const pm = programMeta[programId];
+					const bidx = blockIndex >>> 0;
+					const bind = blockBinding >>> 0;
+					if (pm && pm.uboBlockNames) {
+						const bname = pm.uboBlockNames.get(bidx);
+						if (bname) {
+							let found = false;
+							for (let k = 0; k < pm.uboBindings.length; k++) {
+								if (pm.uboBindings[k][0] === bname) {
+									pm.uboBindings[k][1] = bind;
+									found = true;
+									break;
+								}
+							}
+							if (!found) pm.uboBindings.push([bname, bind]);
+						}
+					}
+					if (c && p && bidx !== 0xFFFFFFFF && typeof c.uniformBlockBinding === 'function') {
+						c.uniformBlockBinding(p, bidx, bind);
+					}
+				},
+				glCmdFlush(bufPtr, wordCount) {
+					const n = wordCount >>> 0;
+					if (!n) return;
+					const c = getGl();
+					const exports = getWasm();
+					if (!c || !exports || !exports.memory) return;
+					const ptr = bufPtr >>> 0;
+					if (!ptr || (ptr & 3) !== 0) return;
+					ensureMemViews(exports.memory);
+					if (perfEnabled) perfStats.cmdFlushes++;
+					const u32 = memU32;
+					const i32 = memI32;
+					const f32 = memF32;
+					let pos = ptr >>> 2;
+					const end = pos + n;
+					let drew = false;
+					let ops = 0;
+					while (pos < end) {
+						const op = u32[pos++];
+						ops++;
+						switch (op) {
+						case 0: /* NOP */
+							break;
+						case 1: { /* USE_PROGRAM */
+							const pid = i32[pos++];
+							currentProgramId = pid;
+							if (pid <= 0) {
+								c.useProgram(null);
+							} else {
+								const p = programs[pid];
+								const pm = programMeta[pid];
+								if (p && pm && pm.linked && !pm.localLinkedInitiated) {
+									if (!(pm.workerDone && !pm.workerOk)) {
+										finalizeLocalProgramLink(c, pid);
+									}
+								}
+								if (p && pm && pm.localReady && !pm.localLinkedOk) {
+									c.useProgram(null);
+								} else {
+									c.useProgram(p || null);
+								}
+							}
+							break;
+						}
+						case 2: { /* ACTIVE_TEXTURE */
+							const texEnum = u32[pos++];
+							const unit = (texEnum - 0x84C0) | 0;
+							if (unit >= 0 && unit < 32) currentActiveTextureUnit = unit;
+							c.activeTexture(texEnum);
+							break;
+						}
+						case 3: { /* BIND_TEXTURE */
+							const target = u32[pos++];
+							const tid = u32[pos++];
+							setBoundTextureId(target, tid);
+							c.bindTexture(target, tid > 0 ? (textures[tid] || null) : null);
+							break;
+						}
+						case 4: { /* BIND_BUFFER */
+							const target = u32[pos++];
+							const bid = u32[pos++];
+							if (target === 0x8892) currentBoundArrayBufferId = bid;
+							else if (target === 0x8893) currentBoundElementBufferId = bid;
+							else if (target === 0x8A11) currentBoundUniformBufferId = bid;
+							c.bindBuffer(target, bid > 0 ? (buffers[bid] || null) : null);
+							break;
+						}
+						case 5: /* ENABLE */
+							c.enable(u32[pos++]);
+							break;
+						case 6: /* DISABLE */
+							c.disable(u32[pos++]);
+							break;
+						case 7: /* DEPTH_MASK */
+							c.depthMask(u32[pos++] !== 0);
+							break;
+						case 8: { /* BLEND_FUNC */
+							const sf = u32[pos++];
+							const df = u32[pos++];
+							c.blendFunc(sf, df);
+							break;
+						}
+						case 9: { /* UNIFORM1I */
+							const locId = i32[pos++];
+							const v0 = i32[pos++];
+							const loc = locId >= 0 ? uniformLocs[locId] : null;
+							if (loc) c.uniform1i(loc, v0);
+							if (perfEnabled) perfStats.uniformUploads++;
+							break;
+						}
+						case 10: { /* UNIFORM1F */
+							const locId = i32[pos++];
+							const v0 = f32[pos++];
+							const loc = locId >= 0 ? uniformLocs[locId] : null;
+							if (loc) c.uniform1f(loc, v0);
+							if (perfEnabled) perfStats.uniformUploads++;
+							break;
+						}
+						case 11: { /* UNIFORM2F */
+							const locId = i32[pos++];
+							const v0 = f32[pos++];
+							const v1 = f32[pos++];
+							const loc = locId >= 0 ? uniformLocs[locId] : null;
+							if (loc) c.uniform2f(loc, v0, v1);
+							if (perfEnabled) perfStats.uniformUploads++;
+							break;
+						}
+						case 12: { /* UNIFORM3F */
+							const locId = i32[pos++];
+							const v0 = f32[pos++];
+							const v1 = f32[pos++];
+							const v2 = f32[pos++];
+							const loc = locId >= 0 ? uniformLocs[locId] : null;
+							if (loc) c.uniform3f(loc, v0, v1, v2);
+							if (perfEnabled) perfStats.uniformUploads++;
+							break;
+						}
+						case 13: { /* UNIFORM4F */
+							const locId = i32[pos++];
+							const v0 = f32[pos++];
+							const v1 = f32[pos++];
+							const v2 = f32[pos++];
+							const v3 = f32[pos++];
+							const loc = locId >= 0 ? uniformLocs[locId] : null;
+							if (loc) c.uniform4f(loc, v0, v1, v2, v3);
+							if (perfEnabled) perfStats.uniformUploads++;
+							break;
+						}
+						case 14: { /* UNIFORM_MAT4 */
+							const locId = i32[pos++];
+							const trans = u32[pos++] !== 0;
+							const loc = locId >= 0 ? uniformLocs[locId] : null;
+							if (loc) {
+								if (isWebGL2) {
+									c.uniformMatrix4fv(loc, trans, f32, pos, 16);
+								} else {
+									c.uniformMatrix4fv(loc, trans, f32.subarray(pos, pos + 16));
+								}
+							}
+							pos += 16;
+							if (perfEnabled) perfStats.uniformUploads++;
+							break;
+						}
+						case 15: { /* VERTEX_ATTRIB_PTR */
+							const idx = u32[pos++];
+							const size = i32[pos++];
+							const type = u32[pos++];
+							const norm = u32[pos++] !== 0;
+							const stride = i32[pos++];
+							const off = u32[pos++];
+							c.vertexAttribPointer(idx, size, type, norm, stride, off);
+							break;
+						}
+						case 16: { /* DRAW_ELEMENTS */
+							const mode = u32[pos++];
+							const count = i32[pos++];
+							const type = u32[pos++];
+							const off = u32[pos++];
+							c.drawElements(mode, count, type, off);
+							drew = true;
+							if (perfEnabled) perfStats.draws++;
+							break;
+						}
+						case 17: { /* DRAW_ELEMENTS_INSTANCED */
+							const mode = u32[pos++];
+							const count = i32[pos++];
+							const type = u32[pos++];
+							const off = u32[pos++];
+							const inst = i32[pos++];
+							if (typeof c.drawElementsInstanced === 'function') {
+								c.drawElementsInstanced(mode, count, type, off, inst);
+							}
+							drew = true;
+							if (perfEnabled) perfStats.draws++;
+							break;
+						}
+						case 18: { /* DRAW_ARRAYS */
+							const mode = u32[pos++];
+							const first = i32[pos++];
+							const count = i32[pos++];
+							c.drawArrays(mode, first, count);
+							drew = true;
+							if (perfEnabled) perfStats.draws++;
+							break;
+						}
+						case 19: /* ENABLE_VAA */
+							c.enableVertexAttribArray(u32[pos++]);
+							break;
+						case 20: /* DISABLE_VAA */
+							c.disableVertexAttribArray(u32[pos++]);
+							break;
+						case 21: { /* VERTEX_ATTRIB_DIVISOR */
+							const idx = u32[pos++];
+							const div = u32[pos++];
+							if (typeof c.vertexAttribDivisor === 'function') {
+								c.vertexAttribDivisor(idx, div);
+							}
+							break;
+						}
+						default:
+							pos = end;
+							break;
+						}
+					}
+					if (perfEnabled) perfStats.cmdOps += ops;
+					if (drew && glCanvas) glCanvas.__stele_dirty = true;
 				}
 			};
 		}

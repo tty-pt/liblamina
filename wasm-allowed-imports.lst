@@ -81,3 +81,7 @@ webgl.glStencilFunc
 webgl.glStencilOp
 webgl.glStencilMask
 webgl.glClearStencil
+webgl.glBindBufferBase
+webgl.glGetUniformBlockIndex
+webgl.glUniformBlockBinding
+webgl.glCmdFlush
