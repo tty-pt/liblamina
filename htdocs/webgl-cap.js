@@ -892,6 +892,29 @@ export function createWebGlBridge(root, getWasm) {
 					}
 					c.bufferData(target, view, usage);
 				},
+				glBufferSubData(target, offset, size, dataPtr) {
+					if (perfEnabled) perfStats.bufferUploads++;
+					const c = getGl();
+					const exports = getWasm();
+					if (!c || !exports || !exports.memory) return;
+					const uoff = offset >>> 0;
+					const usize = size >>> 0;
+					const uptr = dataPtr >>> 0;
+					if (!uptr || !usize) return;
+					ensureMemViews(exports.memory);
+					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : 0);
+					if (bid && bufferMeta[bid] && bufferMeta[bid].data) {
+						const dst = bufferMeta[bid].data;
+						if (uoff + usize <= dst.byteLength) {
+							dst.set(memU8.subarray(uptr, uptr + usize), uoff);
+						}
+					}
+					if (isWebGL2) {
+						c.bufferSubData(target, uoff, memU8, uptr, usize);
+					} else {
+						c.bufferSubData(target, uoff, memU8.subarray(uptr, uptr + usize));
+					}
+				},
 				glCreateTexture() {
 					const c = getGl();
 					if (!c) return 0;

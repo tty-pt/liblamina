@@ -28,6 +28,7 @@ webgl.glUseProgram
 webgl.glCreateBuffer
 webgl.glBindBuffer
 webgl.glBufferData
+webgl.glBufferSubData
 webgl.glCreateTexture
 webgl.glDeleteTexture
 webgl.glBindTexture

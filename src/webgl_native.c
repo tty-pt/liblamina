@@ -462,6 +462,11 @@ void lam_glBufferData(GLenum target, const void *data, size_t size, GLenum usage
 	glBufferData(target, (GLsizeiptr)size, data, usage);
 }
 
+void lam_glBufferSubData(GLenum target, size_t offset, size_t size, const void *data)
+{
+	glBufferSubData(target, (GLintptr)offset, (GLsizeiptr)size, data);
+}
+
 GLuint lam_glCreateTexture(void)
 {
 	GLuint id = 0;

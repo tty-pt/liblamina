@@ -176,6 +176,9 @@ void glBindBuffer(GLenum target, GLuint buffer);
 __attribute__((import_module("webgl"), import_name("glBufferData")))
 void glBufferData(GLenum target, const void *data, size_t size, GLenum usage);
 
+__attribute__((import_module("webgl"), import_name("glBufferSubData")))
+void glBufferSubData(GLenum target, size_t offset, size_t size, const void *data);
+
 __attribute__((import_module("webgl"), import_name("glCreateTexture")))
 GLuint glCreateTexture(void);
 
@@ -364,6 +367,7 @@ void lam_glUseProgram(GLuint program);
 GLuint lam_glCreateBuffer(void);
 void lam_glBindBuffer(GLenum target, GLuint buffer);
 void lam_glBufferData(GLenum target, const void *data, size_t size, GLenum usage);
+void lam_glBufferSubData(GLenum target, size_t offset, size_t size, const void *data);
 GLuint lam_glCreateTexture(void);
 void lam_glDeleteTexture(GLuint texture);
 void lam_glBindTexture(GLenum target, GLuint texture);
@@ -454,6 +458,7 @@ void lam_glBlitFramebuffer(GLint sx0, GLint sy0, GLint sx1, GLint sy1,
 #define glCreateBuffer                   lam_glCreateBuffer
 #define glBindBuffer                     lam_glBindBuffer
 #define glBufferData                     lam_glBufferData
+#define glBufferSubData                  lam_glBufferSubData
 #define glCreateTexture                  lam_glCreateTexture
 #define glDeleteTexture                  lam_glDeleteTexture
 #define glBindTexture                    lam_glBindTexture
@@ -526,6 +531,7 @@ static inline void glUseProgram(GLuint p) { (void)p; }
 static inline GLuint glCreateBuffer(void) { return 1; }
 static inline void glBindBuffer(GLenum t, GLuint b) { (void)t; (void)b; }
 static inline void glBufferData(GLenum t, const void *d, size_t s, GLenum u) { (void)t; (void)d; (void)s; (void)u; }
+static inline void glBufferSubData(GLenum t, size_t o, size_t s, const void *d) { (void)t; (void)o; (void)s; (void)d; }
 static inline GLuint glCreateTexture(void) { return 1; }
 static inline void glDeleteTexture(GLuint t) { (void)t; }
 static inline void glBindTexture(GLenum t, GLuint tex) { (void)t; (void)tex; }
