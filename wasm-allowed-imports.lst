@@ -87,3 +87,8 @@ webgl.glUniformBlockBinding
 webgl.glCmdFlush
 webgl.glTimerBegin
 webgl.glTimerEnd
+webgl.glCreateVertexArray
+webgl.glDeleteVertexArray
+webgl.glBindVertexArray
+webgl.glTexStorage3D
+webgl.glGenerateMipmap

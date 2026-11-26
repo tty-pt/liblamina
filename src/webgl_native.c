@@ -907,10 +907,71 @@ void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count)
 			glVertexAttribDivisor((GLuint)buf[i], (GLuint)buf[i + 1u]);
 			i += 2u;
 			break;
+		case 22u: /* BIND_VAO */ {
+			if (i + 1u > word_count) return;
+			GLuint vao = (GLuint)buf[i++];
+			GLuint actual = (vao == 0 && g_active_surface) ? g_active_surface->default_vao : vao;
+			glBindVertexArray(actual);
+			break;
+		}
 		default:
 			return;
 		}
 	}
+}
+
+GLuint lam_glCreateVertexArray(void)
+{
+	GLuint id = 0;
+	glGenVertexArrays(1, &id);
+	return id;
+}
+
+void lam_glDeleteVertexArray(GLuint vao)
+{
+	if (vao)
+		glDeleteVertexArrays(1, &vao);
+}
+
+void lam_glBindVertexArray(GLuint vao)
+{
+	GLuint actual = (vao == 0 && g_active_surface) ? g_active_surface->default_vao : vao;
+	glBindVertexArray(actual);
+}
+
+void lam_glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat,
+                        GLsizei width, GLsizei height, GLsizei depth)
+{
+#ifndef __APPLE__
+	if (glTexStorage3D) {
+		glTexStorage3D(target, levels, internalformat, width, height, depth);
+		return;
+	}
+#endif
+	GLenum format = GL_RGBA;
+	GLenum type = GL_UNSIGNED_BYTE;
+	switch (internalformat) {
+	case GL_R16I:    format = GL_RED_INTEGER; type = GL_SHORT; break;
+	case GL_R16F:    format = GL_RED;         type = GL_FLOAT; break;
+	case GL_R8:      format = GL_RED;         type = GL_UNSIGNED_BYTE; break;
+	case GL_RGBA16F: format = GL_RGBA;        type = GL_FLOAT; break;
+	default:         format = GL_RGBA;        type = GL_UNSIGNED_BYTE; break;
+	}
+	GLsizei lw = width > 0 ? width : 1;
+	GLsizei lh = height > 0 ? height : 1;
+	for (GLsizei lvl = 0; lvl < levels; lvl++) {
+		glTexImage3D(target, lvl, (GLint)internalformat, lw, lh, depth, 0,
+		             format, type, NULL);
+		if (lw > 1) lw >>= 1;
+		if (lh > 1) lh >>= 1;
+	}
+	glTexParameteri(target, GL_TEXTURE_BASE_LEVEL, 0);
+	glTexParameteri(target, GL_TEXTURE_MAX_LEVEL, levels > 0 ? levels - 1 : 0);
+}
+
+void lam_glGenerateMipmap(GLenum target)
+{
+	glGenerateMipmap(target);
 }
 
 void lam_glTimerBegin(GLuint pass_id)

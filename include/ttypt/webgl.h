@@ -79,6 +79,7 @@ typedef unsigned int GLbitfield;
 #define GL_CLAMP_TO_EDGE          0x812F
 #define GL_RGBA                   0x1908
 #define GL_R16I                   0x8233
+#define GL_R16F                   0x822D
 #define GL_RED_INTEGER            0x8D94
 #define GL_UNPACK_ALIGNMENT       0x0CF5
 /* Offscreen render targets (WebGL2): framebuffers, renderbuffers, resolve blits */
@@ -134,7 +135,8 @@ enum lam_gl_cmd_op {
 	LAM_GL_CMD_DRAW_ARRAYS             = 18, /* [op, mode, first, count] */
 	LAM_GL_CMD_ENABLE_VAA              = 19, /* [op, index] */
 	LAM_GL_CMD_DISABLE_VAA             = 20, /* [op, index] */
-	LAM_GL_CMD_VERTEX_ATTRIB_DIVISOR   = 21  /* [op, index, divisor] */
+	LAM_GL_CMD_VERTEX_ATTRIB_DIVISOR   = 21, /* [op, index, divisor] */
+	LAM_GL_CMD_BIND_VAO                = 22  /* [op, vao] */
 };
 
 #ifdef __wasm__
@@ -376,6 +378,22 @@ void glTimerBegin(GLuint pass_id);
 __attribute__((import_module("webgl"), import_name("glTimerEnd")))
 void glTimerEnd(GLuint pass_id);
 
+__attribute__((import_module("webgl"), import_name("glCreateVertexArray")))
+GLuint glCreateVertexArray(void);
+
+__attribute__((import_module("webgl"), import_name("glDeleteVertexArray")))
+void glDeleteVertexArray(GLuint vao);
+
+__attribute__((import_module("webgl"), import_name("glBindVertexArray")))
+void glBindVertexArray(GLuint vao);
+
+__attribute__((import_module("webgl"), import_name("glTexStorage3D")))
+void glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat,
+                    GLsizei width, GLsizei height, GLsizei depth);
+
+__attribute__((import_module("webgl"), import_name("glGenerateMipmap")))
+void glGenerateMipmap(GLenum target);
+
 #elif defined(LAM_WEBGL_NATIVE)
 
 typedef struct lam_webgl_surface lam_webgl_surface_t;
@@ -487,6 +505,12 @@ void lam_glUniformBlockBinding(GLuint program, GLuint blockIndex, GLuint blockBi
 void lam_glCmdFlush(const uint32_t *buf, uint32_t word_count);
 void lam_glTimerBegin(GLuint pass_id);
 void lam_glTimerEnd(GLuint pass_id);
+GLuint lam_glCreateVertexArray(void);
+void lam_glDeleteVertexArray(GLuint vao);
+void lam_glBindVertexArray(GLuint vao);
+void lam_glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat,
+                        GLsizei width, GLsizei height, GLsizei depth);
+void lam_glGenerateMipmap(GLenum target);
 
 #define glViewport                       lam_glViewport
 #define glClearColor                     lam_glClearColor
@@ -564,6 +588,11 @@ void lam_glTimerEnd(GLuint pass_id);
 #define glCmdFlush                       lam_glCmdFlush
 #define glTimerBegin                     lam_glTimerBegin
 #define glTimerEnd                       lam_glTimerEnd
+#define glCreateVertexArray              lam_glCreateVertexArray
+#define glDeleteVertexArray              lam_glDeleteVertexArray
+#define glBindVertexArray                lam_glBindVertexArray
+#define glTexStorage3D                   lam_glTexStorage3D
+#define glGenerateMipmap                 lam_glGenerateMipmap
 
 #else
 
@@ -647,6 +676,12 @@ static inline void glUniformBlockBinding(GLuint program, GLuint blockIndex, GLui
 static inline void glCmdFlush(const uint32_t *buf, uint32_t word_count) { (void)buf; (void)word_count; }
 static inline void glTimerBegin(GLuint pass_id) { (void)pass_id; }
 static inline void glTimerEnd(GLuint pass_id) { (void)pass_id; }
+static inline GLuint glCreateVertexArray(void) { return 1; }
+static inline void glDeleteVertexArray(GLuint vao) { (void)vao; }
+static inline void glBindVertexArray(GLuint vao) { (void)vao; }
+static inline void glTexStorage3D(GLenum t, GLsizei l, GLenum inf, GLsizei w, GLsizei h, GLsizei d)
+{ (void)t; (void)l; (void)inf; (void)w; (void)h; (void)d; }
+static inline void glGenerateMipmap(GLenum t) { (void)t; }
 
 #endif
 
@@ -884,6 +919,13 @@ static inline void lam_gl_cmd_vertex_attrib_divisor(lam_gl_cmd_buf_t *cb, GLuint
 	p[0] = LAM_GL_CMD_VERTEX_ATTRIB_DIVISOR;
 	p[1] = (uint32_t)index;
 	p[2] = (uint32_t)divisor;
+}
+
+static inline void lam_gl_cmd_bind_vao(lam_gl_cmd_buf_t *cb, GLuint vao)
+{
+	uint32_t *p = lam_gl_cmd_alloc(cb, 2u);
+	p[0] = LAM_GL_CMD_BIND_VAO;
+	p[1] = (uint32_t)vao;
 }
 
 #ifdef __cplusplus

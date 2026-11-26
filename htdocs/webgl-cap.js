@@ -126,10 +126,22 @@ export function createWebGlBridge(root, getWasm) {
 	const framebufferMeta = [null];
 	const renderbuffers = [null];
 	const renderbufferMeta = [null];
+	const vaos = [null];
+	const vaoMeta = [null];
+	let currentBoundVaoId = 0;
 	let currentBoundFramebufferId = 0;
 	let currentBoundRenderbufferId = 0;
 	let currentProgramId = 0;
 	let currentUnpackAlignment = 4;
+
+	function getVaoAttrib(vm, idx) {
+		let a = vm.attribs[idx];
+		if (!a) {
+			a = { enabled: false, hasPtr: false, bufId: 0, size: 4, type: 0x1406, normalized: false, stride: 0, offset: 0, divisor: 0 };
+			vm.attribs[idx] = a;
+		}
+		return a;
+	}
 	const attachedShadersByProgram = new WeakMap();
 	const uniformLocs = [null];
 	const uniformMeta = [null];
@@ -468,6 +480,34 @@ export function createWebGlBridge(root, getWasm) {
 			}
 			buffers[i] = b;
 		}
+		if (typeof c.createVertexArray === 'function' && typeof c.bindVertexArray === 'function') {
+			for (let i = 1; i < vaoMeta.length; i++) {
+				const vm = vaoMeta[i];
+				if (!vm) { vaos[i] = null; continue; }
+				const v = c.createVertexArray();
+				vaos[i] = v;
+				if (!v) continue;
+				c.bindVertexArray(v);
+				if (vm.ebId > 0) {
+					c.bindBuffer(c.ELEMENT_ARRAY_BUFFER, buffers[vm.ebId] || null);
+				}
+				for (let loc = 0; loc < vm.attribs.length; loc++) {
+					const a = vm.attribs[loc];
+					if (!a) continue;
+					if (a.hasPtr) {
+						c.bindBuffer(c.ARRAY_BUFFER, a.bufId > 0 ? (buffers[a.bufId] || null) : null);
+						c.vertexAttribPointer(loc, a.size, a.type, a.normalized, a.stride, a.offset);
+					}
+					if (a.divisor && typeof c.vertexAttribDivisor === 'function') {
+						c.vertexAttribDivisor(loc, a.divisor);
+					}
+					if (a.enabled) {
+						c.enableVertexAttribArray(loc);
+					}
+				}
+			}
+			c.bindVertexArray(null);
+		}
 		const nullFboTexIds = new Set();
 		if (typeof c.activeTexture === 'function') c.activeTexture(0x84C0);
 		for (let i = 1; i < textureMeta.length; i++) {
@@ -476,7 +516,17 @@ export function createWebGlBridge(root, getWasm) {
 			const t = c.createTexture();
 			if (t && tm.target) {
 				c.bindTexture(tm.target, t);
-				if (Array.isArray(tm.mips) && tm.mips.length > 0) {
+				if (tm.storage3D && typeof c.texStorage3D === 'function') {
+					const st = tm.storage3D;
+					c.texStorage3D(tm.target, st.levels, st.internalformat, st.width, st.height, st.depth);
+					if (tm.layers && typeof c.texSubImage3D === 'function') {
+						for (const entry of tm.layers.values()) {
+							c.pixelStorei(c.UNPACK_ALIGNMENT, entry.unpackAlignment || 1);
+							c.texSubImage3D(tm.target, entry.level, entry.xoffset, entry.yoffset, entry.zoffset,
+								entry.width, entry.height, entry.depth, entry.format, entry.type, entry.pixels);
+						}
+					}
+				} else if (Array.isArray(tm.mips) && tm.mips.length > 0) {
 					let hasPixels = false;
 					for (let lvl = 0; lvl < tm.mips.length; lvl++) {
 						const m = tm.mips[lvl];
@@ -510,6 +560,9 @@ export function createWebGlBridge(root, getWasm) {
 					} else {
 						c.texParameteri(tm.target, pname, param);
 					}
+				}
+				if (tm.mipmapped && typeof c.generateMipmap === 'function') {
+					c.generateMipmap(tm.target);
 				}
 			}
 			textures[i] = t;
@@ -598,8 +651,13 @@ export function createWebGlBridge(root, getWasm) {
 			}
 			c.activeTexture(0x84C0 + currentActiveTextureUnit);
 		}
+		if (typeof c.bindVertexArray === 'function') {
+			c.bindVertexArray(currentBoundVaoId > 0 ? (vaos[currentBoundVaoId] || null) : null);
+		}
 		c.bindBuffer(c.ARRAY_BUFFER, currentBoundArrayBufferId > 0 ? (buffers[currentBoundArrayBufferId] || null) : null);
-		c.bindBuffer(c.ELEMENT_ARRAY_BUFFER, currentBoundElementBufferId > 0 ? (buffers[currentBoundElementBufferId] || null) : null);
+		if (currentBoundVaoId === 0) {
+			c.bindBuffer(c.ELEMENT_ARRAY_BUFFER, currentBoundElementBufferId > 0 ? (buffers[currentBoundElementBufferId] || null) : null);
+		}
 		if (typeof c.bindBufferBase === 'function') {
 			if (currentBoundUniformBufferId > 0) {
 				c.bindBuffer(0x8A11, buffers[currentBoundUniformBufferId] || null);
@@ -620,6 +678,7 @@ export function createWebGlBridge(root, getWasm) {
 	let cachedBuf = null;
 	let memU8 = null;
 	let memI16 = null;
+	let memU16 = null;
 	let memI32 = null;
 	let memU32 = null;
 	let memF32 = null;
@@ -630,6 +689,7 @@ export function createWebGlBridge(root, getWasm) {
 			cachedBuf = buf;
 			memU8 = new Uint8Array(buf);
 			memI16 = new Int16Array(buf);
+			memU16 = new Uint16Array(buf);
 			memI32 = new Int32Array(buf);
 			memU32 = new Uint32Array(buf);
 			memF32 = new Float32Array(buf);
@@ -719,6 +779,7 @@ export function createWebGlBridge(root, getWasm) {
 			cachedBuf = null;
 			memU8 = null;
 			memI16 = null;
+			memU16 = null;
 			memI32 = null;
 			memU32 = null;
 			memF32 = null;
@@ -728,6 +789,7 @@ export function createWebGlBridge(root, getWasm) {
 			timerExt = null;
 			resetGpuTimerQueries();
 			currentProgramId = 0;
+			currentBoundVaoId = 0;
 			currentBoundUniformBufferId = 0;
 			boundUniformBufferBases.clear();
 			currentUnpackAlignment = 4;
@@ -1005,8 +1067,13 @@ export function createWebGlBridge(root, getWasm) {
 				glBindBuffer(target, bufferId) {
 					const c = getGl();
 					if (target === 0x8892) currentBoundArrayBufferId = bufferId;
-					else if (target === 0x8893) currentBoundElementBufferId = bufferId;
-					else if (target === 0x8A11) currentBoundUniformBufferId = bufferId;
+					else if (target === 0x8893) {
+						if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+							vaoMeta[currentBoundVaoId].ebId = bufferId;
+						} else {
+							currentBoundElementBufferId = bufferId;
+						}
+					} else if (target === 0x8A11) currentBoundUniformBufferId = bufferId;
 					const b = buffers[bufferId];
 					if (c) c.bindBuffer(target, b || null);
 				},
@@ -1015,7 +1082,8 @@ export function createWebGlBridge(root, getWasm) {
 					const c = getGl();
 					const exports = getWasm();
 					if (!c || !exports || !exports.memory) return;
-					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : (target === 0x8A11 ? currentBoundUniformBufferId : 0));
+					const curEb = (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) ? vaoMeta[currentBoundVaoId].ebId : currentBoundElementBufferId;
+					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? curEb : (target === 0x8A11 ? currentBoundUniformBufferId : 0));
 					const uptr = dataPtr >>> 0;
 					const usize = size >>> 0;
 					if (!uptr) {
@@ -1047,7 +1115,8 @@ export function createWebGlBridge(root, getWasm) {
 					const uptr = dataPtr >>> 0;
 					if (!uptr || !usize) return;
 					ensureMemViews(exports.memory);
-					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? currentBoundElementBufferId : (target === 0x8A11 ? currentBoundUniformBufferId : 0));
+					const curEb = (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) ? vaoMeta[currentBoundVaoId].ebId : currentBoundElementBufferId;
+					const bid = target === 0x8892 ? currentBoundArrayBufferId : (target === 0x8893 ? curEb : (target === 0x8A11 ? currentBoundUniformBufferId : 0));
 					if (bid && bufferMeta[bid] && bufferMeta[bid].data) {
 						const dst = bufferMeta[bid].data;
 						if (uoff + usize <= dst.byteLength) {
@@ -1066,7 +1135,7 @@ export function createWebGlBridge(root, getWasm) {
 					const t = c.createTexture();
 					if (!t) return 0;
 					textures.push(t);
-					textureMeta.push({ target: 0, is3D: false, params: [], mips: [], level: 0, internalformat: 0, width: 0, height: 0, depth: 0, border: 0, format: 0, type: 0, unpackAlignment: 4, pixels: null });
+					textureMeta.push({ target: 0, is3D: false, storage3D: null, layers: null, mipmapped: false, params: [], mips: [], level: 0, internalformat: 0, width: 0, height: 0, depth: 0, border: 0, format: 0, type: 0, unpackAlignment: 4, pixels: null });
 					return textures.length - 1;
 				},
 				glDeleteTexture(texId) {
@@ -1331,44 +1400,147 @@ export function createWebGlBridge(root, getWasm) {
 					const m = (tm && tm.mips) ? tm.mips[lvl] : null;
 					ensureMemViews(exports.memory);
 					const count = width * height * depth;
+					let view;
+					let CopyCtor;
 					if (type === 0x1402) {
-						const view = ((ptr & 1) === 0)
+						view = ((ptr & 1) === 0)
 							? memI16.subarray(ptr >>> 1, (ptr >>> 1) + count)
 							: new Int16Array(exports.memory.buffer.slice(ptr, ptr + count * 2));
+						CopyCtor = Int16Array;
 						if (m && m.pixels && xoffset === 0 && yoffset === 0 && width === m.width && height === m.height && zoffset >= 0 && zoffset + depth <= m.depth) {
 							m.pixels.set(view, zoffset * m.width * m.height);
 						}
-						c.texSubImage3D(target, lvl, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
-					} else if (type === 0x1406) {
+					} else if (type === 0x140B) {
 						const ch = (format === 0x1903 || format === 0x1902 || format === 0x8D94) ? 1 : 4;
 						const len = count * ch;
-						const view = ((ptr & 3) === 0)
-							? memF32.subarray(ptr >>> 2, (ptr >>> 2) + len)
-							: new Float32Array(exports.memory.buffer.slice(ptr, ptr + len * 4));
+						view = ((ptr & 1) === 0)
+							? memU16.subarray(ptr >>> 1, (ptr >>> 1) + len)
+							: new Uint16Array(exports.memory.buffer.slice(ptr, ptr + len * 2));
+						CopyCtor = Uint16Array;
 						if (m && m.pixels && xoffset === 0 && yoffset === 0 && width === m.width && height === m.height && zoffset >= 0 && zoffset + depth <= m.depth) {
 							m.pixels.set(view, zoffset * m.width * m.height * ch);
 						}
-						c.texSubImage3D(target, lvl, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
+					} else if (type === 0x1406) {
+						const ch = (format === 0x1903 || format === 0x1902 || format === 0x8D94) ? 1 : 4;
+						const len = count * ch;
+						view = ((ptr & 3) === 0)
+							? memF32.subarray(ptr >>> 2, (ptr >>> 2) + len)
+							: new Float32Array(exports.memory.buffer.slice(ptr, ptr + len * 4));
+						CopyCtor = Float32Array;
+						if (m && m.pixels && xoffset === 0 && yoffset === 0 && width === m.width && height === m.height && zoffset >= 0 && zoffset + depth <= m.depth) {
+							m.pixels.set(view, zoffset * m.width * m.height * ch);
+						}
 					} else {
 						const bpp = (format === 0x1903 || format === 0x8D94) ? 1 : (format === 0x1907 ? 3 : 4);
-						const view = memU8.subarray(ptr, ptr + count * bpp);
+						view = memU8.subarray(ptr, ptr + count * bpp);
+						CopyCtor = Uint8Array;
 						if (m && m.pixels && xoffset === 0 && yoffset === 0 && width === m.width && height === m.height && zoffset >= 0 && zoffset + depth <= m.depth) {
 							m.pixels.set(view, zoffset * m.width * m.height * bpp);
 						}
-						c.texSubImage3D(target, lvl, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
+					}
+					if (tm && tm.storage3D && tm.layers && depth === 1) {
+						const key = (lvl << 16) | (zoffset & 0xFFFF);
+						const prev = tm.layers.get(key);
+						if (prev && prev.pixels instanceof CopyCtor && prev.pixels.length === view.length &&
+						    prev.xoffset === xoffset && prev.yoffset === yoffset && prev.width === width && prev.height === height) {
+							prev.pixels.set(view);
+							prev.format = format;
+							prev.type = type;
+							prev.unpackAlignment = currentUnpackAlignment;
+						} else {
+							tm.layers.set(key, {
+								level: lvl, xoffset, yoffset, zoffset, width, height, depth,
+								format, type, unpackAlignment: currentUnpackAlignment,
+								pixels: new CopyCtor(view)
+							});
+						}
+					}
+					c.texSubImage3D(target, lvl, xoffset, yoffset, zoffset, width, height, depth, format, type, view);
+				},
+				glTexStorage3D(target, levels, internalformat, width, height, depth) {
+					const c = getGl();
+					const boundId = getBoundTextureId(target);
+					const tm = boundId ? textureMeta[boundId] : null;
+					if (tm) {
+						tm.target = target;
+						tm.is3D = true;
+						tm.storage3D = { levels: levels | 0, internalformat, width, height, depth };
+						tm.width = width;
+						tm.height = height;
+						tm.depth = depth;
+						tm.internalformat = internalformat;
+						tm.mips = [];
+						tm.layers = new Map();
+						tm.mipmapped = false;
+					}
+					if (c && typeof c.texStorage3D === 'function') {
+						c.texStorage3D(target, levels | 0, internalformat, width, height, depth);
+					}
+				},
+				glGenerateMipmap(target) {
+					const c = getGl();
+					const boundId = getBoundTextureId(target);
+					const tm = boundId ? textureMeta[boundId] : null;
+					if (tm) tm.mipmapped = true;
+					if (c && typeof c.generateMipmap === 'function') {
+						c.generateMipmap(target);
+					}
+				},
+				glCreateVertexArray() {
+					const c = getGl();
+					if (!c || typeof c.createVertexArray !== 'function') return 0;
+					const v = c.createVertexArray();
+					if (!v) return 0;
+					vaos.push(v);
+					vaoMeta.push({ ebId: 0, attribs: [] });
+					return vaos.length - 1;
+				},
+				glDeleteVertexArray(vaoId) {
+					const c = getGl();
+					const v = vaos[vaoId];
+					if (c && v && typeof c.deleteVertexArray === 'function') c.deleteVertexArray(v);
+					if (vaoId > 0 && vaoId < vaos.length) {
+						vaos[vaoId] = null;
+						vaoMeta[vaoId] = null;
+					}
+					if (currentBoundVaoId === vaoId) currentBoundVaoId = 0;
+				},
+				glBindVertexArray(vaoId) {
+					const c = getGl();
+					const vid = vaoId | 0;
+					currentBoundVaoId = vid;
+					if (c && typeof c.bindVertexArray === 'function') {
+						c.bindVertexArray(vid > 0 ? (vaos[vid] || null) : null);
 					}
 				},
 				glEnableVertexAttribArray(index) {
 					const c = getGl();
+					if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+						getVaoAttrib(vaoMeta[currentBoundVaoId], index >>> 0).enabled = true;
+					}
 					if (c) c.enableVertexAttribArray(index);
 				},
 				glDisableVertexAttribArray(index) {
 					const c = getGl();
+					if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+						getVaoAttrib(vaoMeta[currentBoundVaoId], index >>> 0).enabled = false;
+					}
 					if (c) c.disableVertexAttribArray(index);
 				},
 				glVertexAttribPointer(index, size, type, normalized, stride, offset) {
 					const c = getGl();
-					if (c) c.vertexAttribPointer(index, size, type, !!normalized, stride, offset >>> 0);
+					const off = offset >>> 0;
+					if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+						const a = getVaoAttrib(vaoMeta[currentBoundVaoId], index >>> 0);
+						a.hasPtr = true;
+						a.bufId = currentBoundArrayBufferId;
+						a.size = size;
+						a.type = type;
+						a.normalized = !!normalized;
+						a.stride = stride;
+						a.offset = off;
+					}
+					if (c) c.vertexAttribPointer(index, size, type, !!normalized, stride, off);
 				},
 				glDrawArrays(mode, first, count) {
 					if (perfEnabled) perfStats.draws++;
@@ -1404,6 +1576,9 @@ export function createWebGlBridge(root, getWasm) {
 				},
 				glVertexAttribDivisor(index, divisor) {
 					const c = getGl();
+					if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+						getVaoAttrib(vaoMeta[currentBoundVaoId], index >>> 0).divisor = divisor >>> 0;
+					}
 					if (c) c.vertexAttribDivisor(index, divisor);
 				},
 				glGetAttribLocation(programId, namePtr, nameLen) {
@@ -1753,8 +1928,13 @@ export function createWebGlBridge(root, getWasm) {
 							const target = u32[pos++];
 							const bid = u32[pos++];
 							if (target === 0x8892) currentBoundArrayBufferId = bid;
-							else if (target === 0x8893) currentBoundElementBufferId = bid;
-							else if (target === 0x8A11) currentBoundUniformBufferId = bid;
+							else if (target === 0x8893) {
+								if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+									vaoMeta[currentBoundVaoId].ebId = bid;
+								} else {
+									currentBoundElementBufferId = bid;
+								}
+							} else if (target === 0x8A11) currentBoundUniformBufferId = bid;
 							c.bindBuffer(target, bid > 0 ? (buffers[bid] || null) : null);
 							break;
 						}
@@ -1851,6 +2031,16 @@ export function createWebGlBridge(root, getWasm) {
 							const norm = u32[pos++] !== 0;
 							const stride = i32[pos++];
 							const off = u32[pos++];
+							if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+								const a = getVaoAttrib(vaoMeta[currentBoundVaoId], idx);
+								a.hasPtr = true;
+								a.bufId = currentBoundArrayBufferId;
+								a.size = size;
+								a.type = type;
+								a.normalized = norm;
+								a.stride = stride;
+								a.offset = off;
+							}
 							c.vertexAttribPointer(idx, size, type, norm, stride, off);
 							break;
 						}
@@ -1886,17 +2076,38 @@ export function createWebGlBridge(root, getWasm) {
 							if (perfEnabled) perfStats.draws++;
 							break;
 						}
-						case 19: /* ENABLE_VAA */
-							c.enableVertexAttribArray(u32[pos++]);
+						case 19: { /* ENABLE_VAA */
+							const idx = u32[pos++];
+							if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+								getVaoAttrib(vaoMeta[currentBoundVaoId], idx).enabled = true;
+							}
+							c.enableVertexAttribArray(idx);
 							break;
-						case 20: /* DISABLE_VAA */
-							c.disableVertexAttribArray(u32[pos++]);
+						}
+						case 20: { /* DISABLE_VAA */
+							const idx = u32[pos++];
+							if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+								getVaoAttrib(vaoMeta[currentBoundVaoId], idx).enabled = false;
+							}
+							c.disableVertexAttribArray(idx);
 							break;
+						}
 						case 21: { /* VERTEX_ATTRIB_DIVISOR */
 							const idx = u32[pos++];
 							const div = u32[pos++];
+							if (currentBoundVaoId > 0 && vaoMeta[currentBoundVaoId]) {
+								getVaoAttrib(vaoMeta[currentBoundVaoId], idx).divisor = div;
+							}
 							if (typeof c.vertexAttribDivisor === 'function') {
 								c.vertexAttribDivisor(idx, div);
+							}
+							break;
+						}
+						case 22: { /* BIND_VAO */
+							const vid = i32[pos++];
+							currentBoundVaoId = vid;
+							if (typeof c.bindVertexArray === 'function') {
+								c.bindVertexArray(vid > 0 ? (vaos[vid] || null) : null);
 							}
 							break;
 						}
