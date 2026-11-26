@@ -70,10 +70,19 @@ static void test_surface_and_es300_pipeline(void)
 	glAttachShader(prog, fs);
 	glBindAttribLocation(prog, 0, "aPos", 4);
 	glLinkProgram(prog);
-	assert(glGetProgramParameter(prog, GL_COMPLETION_STATUS_KHR) == 1);
+	for (int tries = 0; tries < 10000 && !glGetProgramParameter(prog, GL_COMPLETION_STATUS_KHR); tries++) {
+	}
 	assert(glGetProgramParameter(prog, GL_LINK_STATUS) == GL_TRUE);
 	glDeleteShader(vs);
 	glDeleteShader(fs);
+
+	/* Verify minified single-line precision qualifiers translate cleanly to GLSL 330 core */
+	const char *fs_mini = "#version 300 es\nprecision highp float;precision highp int;out vec4 o;void main(){o=vec4(1.0);}\n";
+	GLuint fs_m = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fs_m, fs_mini, strlen(fs_mini));
+	glCompileShader(fs_m);
+	assert(glGetShaderParameter(fs_m, GL_COMPILE_STATUS) == GL_TRUE);
+	glDeleteShader(fs_m);
 
 	/* Odd-width 7x7 R16I height texture */
 	int16_t heights[49];

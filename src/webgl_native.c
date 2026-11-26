@@ -242,6 +242,32 @@ void lam_webgl_end(void)
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
+static int g_parallel_compile_probed = 0;
+static int g_has_parallel_compile = 0;
+
+static void ensure_parallel_compile_probe(void)
+{
+	if (g_parallel_compile_probed)
+		return;
+	g_parallel_compile_probed = 1;
+#if defined(GLEW_ARB_parallel_shader_compile)
+	if (GLEW_ARB_parallel_shader_compile) {
+		g_has_parallel_compile = 1;
+		if (glMaxShaderCompilerThreadsARB)
+			glMaxShaderCompilerThreadsARB(0xFFFFFFFFu);
+		return;
+	}
+#endif
+#if defined(GLEW_KHR_parallel_shader_compile)
+	if (GLEW_KHR_parallel_shader_compile) {
+		g_has_parallel_compile = 1;
+		if (glMaxShaderCompilerThreadsKHR)
+			glMaxShaderCompilerThreadsKHR(0xFFFFFFFFu);
+		return;
+	}
+#endif
+}
+
 /* -------------------------------------------------------------------------
  * GLSL ES 3.00 -> Desktop GLSL 330 core line-preserving translator
  * ------------------------------------------------------------------------- */
@@ -272,12 +298,32 @@ static char *translate_es300_to_gl330(const char *src, size_t len)
 			static const char repl[] = "#version 330 core";
 			memcpy(out + o, repl, sizeof(repl) - 1);
 			o += sizeof(repl) - 1;
-		} else if (rem >= 10 && strncmp(src + p, "precision ", 10) == 0) {
-			/* Strip ES precision qualifier line; keep newline for line parity */
 		} else {
-			size_t raw_len = line_end - line_start;
-			memcpy(out + o, src + line_start, raw_len);
-			o += raw_len;
+			/* Strip leading/consecutive `precision ...;` statements while
+			 * preserving any remaining code on the same line (minified GLSL). */
+			size_t cur = line_start;
+			while (cur < line_end) {
+				size_t ws = cur;
+				while (ws < line_end && (src[ws] == ' ' || src[ws] == '\t' || src[ws] == '\r'))
+					ws++;
+				if (line_end - ws >= 10 && strncmp(src + ws, "precision ", 10) == 0) {
+					size_t semi = ws + 10;
+					while (semi < line_end && src[semi] != ';')
+						semi++;
+					if (semi < line_end && src[semi] == ';') {
+						cur = semi + 1;
+						continue;
+					}
+					cur = line_end;
+					break;
+				}
+				break;
+			}
+			if (cur < line_end) {
+				size_t raw_len = line_end - cur;
+				memcpy(out + o, src + cur, raw_len);
+				o += raw_len;
+			}
 		}
 
 		if (has_nl)
@@ -386,10 +432,20 @@ void lam_glShaderSource(GLuint shader, const char *src, size_t len)
 
 void lam_glCompileShader(GLuint shader)
 {
+	ensure_parallel_compile_probe();
 	glCompileShader(shader);
-	GLint ok = 0;
-	glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-	if (!ok) {
+}
+
+GLint lam_glGetShaderParameter(GLuint shader, GLenum pname)
+{
+	if (pname == GL_COMPLETION_STATUS_KHR) {
+		ensure_parallel_compile_probe();
+		if (!g_has_parallel_compile)
+			return 1;
+	}
+	GLint val = 0;
+	glGetShaderiv(shader, pname, &val);
+	if (pname == GL_COMPILE_STATUS && !val) {
 		char log[2048];
 		GLsizei n = 0;
 		glGetShaderInfoLog(shader, (GLsizei)sizeof(log) - 1, &n, log);
@@ -397,12 +453,6 @@ void lam_glCompileShader(GLuint shader)
 		fprintf(stderr, "lam_webgl: shader %u compile error:\n%s\n",
 		        (unsigned)shader, log);
 	}
-}
-
-GLint lam_glGetShaderParameter(GLuint shader, GLenum pname)
-{
-	GLint val = 0;
-	glGetShaderiv(shader, pname, &val);
 	return val;
 }
 
@@ -418,10 +468,20 @@ void lam_glAttachShader(GLuint program, GLuint shader)
 
 void lam_glLinkProgram(GLuint program)
 {
+	ensure_parallel_compile_probe();
 	glLinkProgram(program);
-	GLint ok = 0;
-	glGetProgramiv(program, GL_LINK_STATUS, &ok);
-	if (!ok) {
+}
+
+GLint lam_glGetProgramParameter(GLuint program, GLenum pname)
+{
+	if (pname == GL_COMPLETION_STATUS_KHR) {
+		ensure_parallel_compile_probe();
+		if (!g_has_parallel_compile)
+			return 1;
+	}
+	GLint val = 0;
+	glGetProgramiv(program, pname, &val);
+	if (pname == GL_LINK_STATUS && !val) {
 		char log[2048];
 		GLsizei n = 0;
 		glGetProgramInfoLog(program, (GLsizei)sizeof(log) - 1, &n, log);
@@ -429,14 +489,6 @@ void lam_glLinkProgram(GLuint program)
 		fprintf(stderr, "lam_webgl: program %u link error:\n%s\n",
 		        (unsigned)program, log);
 	}
-}
-
-GLint lam_glGetProgramParameter(GLuint program, GLenum pname)
-{
-	if (pname == GL_COMPLETION_STATUS_KHR)
-		return 1;
-	GLint val = 0;
-	glGetProgramiv(program, pname, &val);
 	return val;
 }
 
