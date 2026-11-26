@@ -25,10 +25,10 @@
    - Direct RGBA pixel buffer manipulation (`clear`, `fill`, `rect`, `line`, `paint`, `pick`) backed by WebAssembly linear memory with one-call presentation to HTML5 `<canvas>` or WebGL2 textures (`attachCanvas`, `createLaminaRenderer`).
 2. **2D & 3D Viewport & Camera Projection (`ViewportController`)**:
    - Projects world coordinates to screen pixels (`worldToScreen`) and unprojects screen pointers back into world space (`screenToWorld`) using compiled C/WASM camera matrices.
-3. **CSS-Style Flexbox Layout Engine (`FlexNode`)**:
-   - Computes hierarchical row/column flexbox bounds (`setSize`, `setPadding`, `setFlex`, `computeLayout`, `getBounds`) without requiring a browser DOM.
-4. **WebAssembly-to-WebGL2 Capability Bridge (`createLaminaBridge`)**:
-   - Wires `webgl_*` host imports, offscreen framebuffers (with swapchain viewport isolation), stencil/depth states, 2D texture arrays (`webgl_tex_image_3d`, `webgl_tex_sub_image_3d`), GPU hardware instancing (`webgl_draw_arrays_instanced`, `webgl_draw_elements_instanced`, `webgl_vertex_attrib_divisor`), parallel shader compilation (`KHR_parallel_shader_compile`), and continuous 3D terrain/billboard streaming into `@tty-pt/stele` WASM modules.
+3. **CSS Flexbox & Grid Layout Engine (`FlexNode`)**:
+   - Computes hierarchical Flexbox and CSS Grid bounds (`setSize`, `setPadding`, `setFlex`, `computeLayout`, `getBounds`) without requiring a browser DOM (C builds also include a pure-C CSS parser, TrueType fonts, built-in JPEG decoding, and `<ttypt/lam-bud.h>`).
+4. **WebAssembly-to-WebGL2 Capability Bridge (`createLaminaBridge`, `htdocs/webgl-cap.js`)**:
+   - Wires WebGL2 host imports, VAOs (`glCreateVertexArray`, `glBindVertexArray`, `LAM_GL_CMD_BIND_VAO`), UBOs (`glBindBufferBase`), flat `uint32_t` command ring submission (`glCmdFlush`), zero-alloc `glBufferSubData`, offscreen half-float FBOs (`GL_R16F`, `GL_RGBA16F`), 3D / 2D-array textures (`glTexStorage3D`, `glTexImage3D`, `glTexSubImage3D`, `glGenerateMipmap`), GPU hardware instancing (`glDrawArraysInstanced`, `glDrawElementsInstanced`, `glVertexAttribDivisor`), pass timers (`EXT_disjoint_timer_query_webgl2`), and parallel shader compilation (`KHR_parallel_shader_compile`) into `@tty-pt/stele` WASM modules.
 
 ---
 

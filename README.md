@@ -57,75 +57,80 @@ cc my_app.c -I/usr/local/include -L/usr/local/lib -llamina -lcorm -lstele -lpng 
 Most graphics libraries either drag in massive runtime dependencies (SDL2, Raylib, heavyweight windowing systems) or lock developers into high-level GUI toolkits (GTK, Qt, Electron) that are impossible to run on headless servers, embedded Linux, browser WebAssembly reactors, or bare framebuffer kiosks (`/dev/fb0`).
 
 `liblamina` provides an alternative path in pure C:
-- **Zero Heavy Frameworks**: Compact immediate-mode rendering pipeline with procedural pixel hooks (`lam_render`), alpha blending, and double-buffered frame presentation (`lam_flush`).
-- **Flexbox UI Built In**: True CSS-style flexbox container trees (`lam_ui_div`), direction/justify/align layout calculations, computed sizing, and caching (`lam-ui.h`) powered by [libcorm](https://github.com/tty-pt/libcorm).
-- **2.5D / 3D Camera & Depth Pipeline**: Perspective and orthographic $4 \times 4$ matrix math, ground-plane ray unprojecting, 3D tilted-camera tile drawing, and GPU billboard batching (`lam-cam.h`, `lam-tm.h`).
-- **Run on Raw Hardware or Browser WebGL2**: Seamlessly falls back to `/dev/fb0` when no display server is present, auto-detecting screen geometry and bit depth via `ioctl(fb_fd, FBIOGET_VSCREENINFO, ...)`, or streams directly to WebGL2 in the browser via `htdocs/lamina-bridge.js`.
+- **Zero Heavy Frameworks**: Compact immediate-mode rendering pipeline with procedural pixel hooks (`lam_render`), Porter-Duff FBO alpha compositing, built-in PNG and pure-C JPEG decoding (`src/jpeg.c`), and double-buffered frame presentation (`lam_flush`).
+- **CSS Flexbox & Grid UI Built In**: Pure-C CSS parser (`src/ui-css.c`) supporting Flexbox, CSS Grid tracks, `calc(* /)`, inset rings, SVG properties, box shadows, border radii, DOM-style tree mutation ops (`lam-ui.h`), and a zero-coupling `libbud`/`.cx` host adapter (`<ttypt/lam-bud.h>`), powered by [libcorm](https://github.com/tty-pt/libcorm).
+- **Bitmap & TrueType Font Rendering**: Supports both pre-rendered bitmap atlases and built-in TrueType (`.ttf`) fonts with fallback chains (`<ttypt/lam-font.h>`).
+- **2.5D / 3D Camera & Unified OpenGL/WebGL2 Pipeline**: Perspective and orthographic $4 \times 4$ matrix math, ground-plane ray unprojecting, 3D tilted-camera tile drawing, and an identical `<ttypt/webgl.h>` API backed natively by OpenGL/GLFW (`src/webgl_native.c`) or in the browser by `htdocs/webgl-cap.js` and `htdocs/lamina-cap.js`.
+- **Run on Raw Hardware or Browser WebGL2**: Seamlessly falls back to `/dev/fb0` when no display server is present, auto-detecting screen geometry and bit depth via `ioctl(fb_fd, FBIOGET_VSCREENINFO, ...)`, or streams directly to WebGL2 in the browser via `htdocs/webgl-cap.js` and `htdocs/lamina-cap.js`.
 - **Ecosystem Integration**: Direct integration with [libcorm](https://github.com/tty-pt/libcorm) for UI state caching and [libstele](https://github.com/tty-pt/libstele) for cross-platform system primitives and isomorphic WASM boundaries.
 
 ### The Five Jobs It Does
-1. **The 2D Immediate-Mode Canvas**: Primitives, rectangle fills, pixel-by-pixel procedural shaders (`lam_render`), color tinting, and frame presentation via `lam_flush`.
-2. **Textures, Sprites & Tilemaps**: Fast PNG loading, pixel picking/painting, spritesheet subdivision (`lam_tm_new`), and batch 2D/3D tilemap drawing (`lam_tile_map_draw`, `lam_tile_draw_ground_3d`, `lam_tile_draw_billboard_3d`).
-3. **3D Camera & WebGL2 Streaming**: $4 \times 4$ column-major matrix operations, tilted-camera setup (`lam_cam_set_3d`), screen-to-ground ray casting (`lam_unproject_ground`), and WebGL2 terrain/water/billboard hardware flushing (`lam_terrain_mesh_flush`, `lam_billboard_batch_flush`).
-4. **Bitmap Font Rendering**: Pre-rendered bitmap font atlases (`lam-font.h`) with integer scaling, word wrapping, and bounding-box measurement.
-5. **Flexbox UI & Input Dispatch**: Declarative UI trees (`lam-ui.h`) with stylesheet rules, box shadows, border radii, and non-blocking keyboard/gamepad callbacks (`lam-key.h`).
+1. **The 2D Immediate-Mode Canvas**: Primitives, rectangle fills, pixel-by-pixel procedural shaders (`lam_render`), color tinting, Porter-Duff FBO alpha, and frame presentation via `lam_flush`.
+2. **Textures, Sprites & Tilemaps**: Fast PNG and built-in pure-C JPEG loading, pixel picking/painting, spritesheet subdivision (`lam_tm_new`), and batch 2D/3D tilemap drawing (`lam_tile_map_draw`, `lam_tile_draw_ground_3d`, `lam_tile_draw_billboard_3d`).
+3. **3D Camera & Native/Browser WebGL2**: $4 \times 4$ column-major matrix operations, tilted-camera setup (`lam_cam_set_3d`), screen-to-ground ray casting (`lam_unproject_ground`), and unified WebGL2 rendering (VAOs, UBOs, `glCmdFlush` command ring, instancing, 2D/3D texture arrays, half-float FBOs, GPU pass timers) across native OpenGL/GLFW (`src/webgl_native.c`) and WASM (`htdocs/webgl-cap.js`).
+4. **Bitmap & TrueType Font Rendering**: Pre-rendered bitmap font atlases and built-in TrueType (`.ttf`) font rendering (`lam-font.h`) with fallback chains, pixel-sized drawing/measurement, word wrapping, and bounding-box calculation.
+5. **CSS Flexbox/Grid UI, Bud Adapter & Input Dispatch**: Declarative UI trees (`lam-ui.h`) with pure-C CSS parsing (`src/ui-css.c`), Grid/Flexbox layout, `lam-bud.h` reactive host adapter, and non-blocking keyboard/gamepad callbacks (`lam-key.h`).
 
 ---
 
 ## 3. API Overview & Headers
 
-The API contract lives across seven modular headers in `<ttypt/>`:
+The API contract lives across eight modular headers in `<ttypt/>`:
 
 ### 1. Core Rendering & Primitives (`<ttypt/lam.h>`)
 - **Lifecycle & Frame Presentation**: `lam_init()`, `lam_deinit()`, `lam_size(&w, &h)`, `lam_flush()`, `lam_poll()`.
 - **Screen Clearing & Primitives**: `lam_clear(color)`, `lam_fill(x, y, w, h, color)`, `lam_rect(x, y, w, h, border_color, border_width)`, `lam_line(x0, y0, x1, y1, color, thickness)`.
 - **Color Helpers**: `LAM_RGBA(r, g, b, a)`, `LAM_RGB(r, g, b)`, `LAM_COLOR_R/G/B/A(c)`, and standard palette constants (`LAM_COLOR_WHITE`, `LAM_COLOR_BLACK`, `LAM_COLOR_RED`, etc.).
 - **Procedural Shading**: `lam_render(lambda, x, y, w, h, ctx)` for custom pixel-by-pixel generators.
-- **Texture Operations**: `lam_tex_load(filename)`, `lam_tex_draw(tex, x, y, dw, dh)`, `lam_tex_draw_x(...)`, `lam_tex_pick(tex, x, y)`, `lam_tex_paint(tex, x, y, color)`, `lam_tex_save(tex)`, `lam_tint(color)`.
+- **Texture Operations**: `lam_tex_load(filename)` (PNG and built-in pure-C JPEG via `src/jpeg.c`), `lam_tex_draw(tex, x, y, dw, dh)`, `lam_tex_draw_x(...)`, `lam_tex_pick(tex, x, y)`, `lam_tex_paint(tex, x, y, color)`, `lam_tex_save(tex)`, `lam_tint(color)`.
 - **WebGL2 / WASM Streaming Hooks**: `lam_canvas_flush()`, `lam_shader_register()`, `lam_shader_bind()`, `lam_shader_uniforms()`, `lam_terrain_mesh_flush()`, `lam_billboard_batch_flush()`.
 
-### 2. Flexbox UI Layout & Declarative Builders (`<ttypt/lam-ui.h>`)
-- **Declarative Element Constructors**:
+### 2. CSS Flexbox & Grid UI Layout (`<ttypt/lam-ui.h>`)
+- **Declarative Element Constructors & Mutation Ops**:
   - `lam_ui_flex(parent, dir)`: Create a flex container with `display: flex` in row or column orientation.
   - `lam_ui_box(parent, w, h, bg_color)`: Create a sized container with background color.
   - `lam_ui_label(parent, text, font_ref, color)`: Create a text label node with font and color.
-  - `lam_ui_new(parent, style)`: Low-level element creation.
+  - `lam_ui_new(parent, style)`: Low-level element creation, plus DOM-style tree mutation ops for reactive reconcilers.
 - **Direct Style Setters**: `lam_ui_set_size(div, w, h)`, `lam_ui_set_bg(div, color)`, `lam_ui_set_padding(div, left, top, right, bottom)`, `lam_ui_set_flex(div, grow, shrink, basis)`, `lam_ui_set_align(div, align_items, justify_content)`.
 - **Layout Accessors**: `lam_ui_get_x()`, `lam_ui_get_y()`, `lam_ui_get_width()`, `lam_ui_get_height()`, `lam_ui_get_text()`, `lam_ui_get_class()`.
-- **Styling**: `lam_ui_stylesheet_init()` and `lam_ui_stylesheet_add()` to configure background colors, borders, margins, padding, and drop shadows (`lam_box_shadow`, `lam_border_radius`).
+- **Pure-C CSS Parser & Styling (`src/ui-css.c`)**: `lam_ui_stylesheet_init()` and `lam_ui_stylesheet_add()` supporting Flexbox, CSS Grid tracks, `calc(* /)`, inset rings, SVG properties, borders, margins, padding, border radii (`lam_border_radius`), and drop shadows (`lam_box_shadow`).
 - **Caching Engine**: Render cache powered by [libcorm](https://github.com/tty-pt/libcorm) for high-performance layout reuse.
 
-### 3. Pre-Rendered Bitmap Fonts (`<ttypt/lam-font.h>`)
-- **Font Atlas Loading**: `lam_font_open(path)` loads pre-rendered bitmap font atlases (e.g. converted from BDF files via `bdf2tm.py`).
-- **Text Rendering**: `lam_font_draw(...)` renders text at arbitrary integer scales with automatic word wrapping and custom color tinting.
-- **Measurement**: `lam_font_measure(...)` calculates bounding boxes before drawing.
+### 3. Zero-Coupling Bud Reactive Host Adapter (`<ttypt/lam-bud.h>`)
+- Header-only adapter (`lam_bud_host_init()`, `lam_bud_host_ops()`, `lam_bud_sync_layout()`, `lam_bud_dispatch_event()`, `lam_bud_dispatch_click()`) bridging `libbud` reactive reconciler and `.cx` components directly onto `lam_ui` trees without coupling `libbud` to `liblamina`.
 
-### 4. Sprite Tilemaps & 3D Sprites (`<ttypt/lam-tm.h>`)
+### 4. Bitmap & TrueType Fonts (`<ttypt/lam-font.h>`)
+- **Bitmap Atlas Loading**: `lam_font_open(path)` loads pre-rendered bitmap font atlases (e.g. converted from BDF files via `bdf2tm.py`).
+- **TrueType (TTF) Fonts**: `lam_font_open_ttf(path, px_size)`, `lam_font_add_fallback(font_ref, fallback_ref)`, `lam_font_is_ttf()`, `lam_font_line_height()`, `lam_font_ascent()`.
+- **Text Rendering & Measurement**: `lam_font_draw(...)` / `lam_font_draw_px(...)` and `lam_font_measure(...)` / `lam_font_measure_px(...)` render and measure text with word wrapping and color tinting.
+
+### 5. Sprite Tilemaps & 3D Sprites (`<ttypt/lam-tm.h>`)
 - **Atlas Subdivision**: `lam_tm_new(tex, tile_w, tile_h)` segments a spritesheet into a 2D tile grid.
 - **Tile Presentation**: Draw individual tiles by index (`lam_tile_draw(...)`).
 - **Batch Grid Map Drawing**: `lam_tile_map_draw(tm_ref, tiles, map_w, map_h, x, y, scale)` renders entire 2D map grids from a tile index buffer in a single call.
 - **3D Ground & Billboard Tiles**: `lam_tile_draw_ground_3d(tm_ref, idx, wx, wy, wz, tw, th)` and `lam_tile_draw_billboard_3d(tm_ref, idx, wx, wy, wz, sw, sh, anchor_y)`.
 
-### 5. 3D Camera & Matrix Math (`<ttypt/lam-cam.h>`)
+### 6. 3D Camera & Matrix Math (`<ttypt/lam-cam.h>`)
 - **Matrix Math (`lam_mat4_t`)**: `lam_mat4_identity`, `lam_mat4_mul`, `lam_mat4_translate`, `lam_mat4_scale`, `lam_mat4_rotate_x/y/z`, `lam_mat4_perspective`, `lam_mat4_ortho`, `lam_mat4_look_at`, `lam_mat4_invert`.
 - **Camera Control**: `lam_cam_set_3d(...)`, `lam_cam_set_2d()`, `lam_cam_is_3d()`, `lam_cam_get()`, `lam_cam_get_vp()`, `lam_unproject_ground()`.
 
-### 6. Input Mapping & Gamepads (`<ttypt/lam-key.h>`)
+### 7. Input Mapping & Gamepads (`<ttypt/lam-key.h>`)
 - **Callbacks**: `lam_key_reg(key, callback)` and `lam_key_default_reg(callback)` for non-blocking raw key events.
 - **Key Code Translation**: `lam_key_val(code)` and `lam_key_parse(target, len, code, flags)` map hardware keycodes to ASCII/UTF-8 characters.
 - **Gamepads & Hats**: Constants for directional pads and buttons (`LAM_HAT_*`, `LAM_GAMEPAD_*`).
 
-### 7. WebGL2 Hardware Bridge (`<ttypt/webgl.h>`, `htdocs/lamina-bridge.js`, `htdocs/webgl-cap.js`)
-- Low-level WebAssembly-to-WebGL2 binding definitions and the self-contained browser runtime (`createLaminaBridge`) supporting continuous 3D terrain meshes, multi-scale procedural water optics, hardware-instanced billboards and terrain (`webgl_draw_arrays_instanced`, `webgl_draw_elements_instanced`, `webgl_vertex_attrib_divisor`), 2D texture arrays (`webgl_tex_image_3d`, `webgl_tex_sub_image_3d`), offscreen FBO passes with canvas swapchain viewport isolation, and asynchronous shader compilation (`KHR_parallel_shader_compile`).
+### 8. Unified Native & WebGL2 Hardware Bridge (`<ttypt/webgl.h>`, `src/webgl_native.c`, `htdocs/webgl-cap.js`, `htdocs/lamina-cap.js`)
+- Portable WebGL2-shaped C API backed natively by desktop OpenGL/GLFW (`src/webgl_native.c`) and in the browser by `htdocs/webgl-cap.js` (`createWebGlBridge`) and `htdocs/lamina-cap.js` (`createLaminaBridge`).
+- Supports WebGL2 VAOs (`glCreateVertexArray`, `glBindVertexArray`, `LAM_GL_CMD_BIND_VAO`), UBOs (`glBindBufferBase`, `glGetUniformBlockIndex`, `glUniformBlockBinding`), flat `uint32_t` command ring submission (`glCmdFlush`), zero-alloc `glBufferSubData`, hardware instancing (`glDrawArraysInstanced`, `glDrawElementsInstanced`, `glVertexAttribDivisor`), 3D / 2D-array textures (`glTexStorage3D`, `glTexImage3D`, `glTexSubImage3D`, `glGenerateMipmap`), half-float formats (`GL_R16F`, `GL_RGBA16F`, `GL_HALF_FLOAT`), offscreen FBO passes with swapchain viewport isolation, GPU pass timers (`EXT_disjoint_timer_query_webgl2` via `glTimerBegin`/`glTimerEnd`), and asynchronous shader compilation (`KHR_parallel_shader_compile`).
 
 ---
 
 ## 4. Display Backends
 
-- **Linux Desktop**: Automatically uses GLFW when running under an active X11 or Wayland session (`DISPLAY` or `WAYLAND_DISPLAY` set).
+- **Linux Desktop**: Automatically uses GLFW when running under an active X11 or Wayland session (`DISPLAY` or `WAYLAND_DISPLAY` set), including native OpenGL execution of `<ttypt/webgl.h>` via `src/webgl_native.c`.
 - **Embedded Linux Framebuffer**: Falls back to direct `/dev/fb0` rendering when no display server is present, accessing screen buffers without X11.
 - **macOS & Windows**: Native GLFW backend with OpenGL acceleration.
-- **Browser (WebGL2 / Canvas)**: Hardware-accelerated WebGL2 and 2D Canvas presentation via `htdocs/lamina-bridge.js` and `@tty-pt/lamina`.
+- **Browser (WebGL2 / Canvas)**: Hardware-accelerated WebGL2 and 2D Canvas presentation via `htdocs/webgl-cap.js`, `htdocs/lamina-cap.js`, and `@tty-pt/lamina`.
 
 ### Linux Framebuffer Setup (`/dev/fb0`)
 
@@ -171,19 +176,19 @@ See [examples/README.md](examples/README.md) for detailed walkthroughs.
 The library includes an extensive test suite covering all public subsystems:
 
 ```sh
-make test-build       # builds all 9 C test binaries
-make test             # executes unit tests across core, textures, fonts, tilemaps, 3D camera, and UI
+make test-build       # builds the C unit and integration test binaries
+make test             # executes unit tests across core, textures, fonts, CSS, WebGL, Bud/.cx, and UI
 make npm-test         # builds and executes the Node.js & WebAssembly test suite
 ```
 
 Test coverage spans:
-- Core rendering and viewport clipping
-- PNG texture loading and sub-region blitting
-- Font atlas parsing and wrapping math
-- Tilemap indexing and bounds checking
+- Core rendering and viewport clipping (`test_core`)
+- PNG/JPEG texture loading and sub-region blitting (`test_textures`)
+- Bitmap and TrueType (`.ttf`) font rendering and wrapping math (`test_fonts`, `test_fonts_ttf`)
+- Tilemap indexing and bounds checking (`test_tilemaps`)
 - 3D camera matrix math, perspective projection, and ground-plane ray unprojecting (`test_cam_3d`)
-- Flexbox layout hierarchy calculations and sizing algorithms
-- UI styling and `libcorm` layout cache eviction
+- Pure-C CSS parser, Flexbox/Grid layout calculations, styling, and `libcorm` cache eviction (`test_css_parser`, `test_ui_layout`, `test_ui_style`, `test_ui_render`)
+- Native OpenGL/GLFW WebGL2 surface (`test_webgl`) and `libbud` / `.cx` reactive UI host integration (`test_bud_lamina`, `test_cx_lamina`, `tests/music_panel.cx`)
 - WebGL2 & WebAssembly surface/bridge integration (`npm/tests/lamina.test.mjs`)
 
 ---
